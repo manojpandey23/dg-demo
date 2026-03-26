@@ -1,0 +1,387 @@
+version: "1.0"
+name: "api_ingestion_pipeline"
+description: "Config-driven pipeline: API polling → DB persistence → Data staging"
+
+# ============================================================
+# Global Defaults
+# ============================================================
+defaults:
+  group: "framework"
+  tags:
+    owner: "data-platform"
+    managed_by: "framework"
+
+# ============================================================
+# ASSETS
+# ============================================================
+assets:
+
+  # ----------------------------------------------------------
+  # API -> Price API Ingestion
+  # ----------------------------------------------------------
+
+  # Asset 1: cash_balance_api
+  - name: cash_balance_api
+    type: api
+    description: "Fetch cash balance from REST API"
+    group_name: source
+    tags:
+      source: "external_api"
+
+    source:
+      resource: api_resource
+      endpoint: /cash_balance
+      method: GET
+
+    columns:
+
+      - name: account_cd
+        description: "Maps to Fund Code"
+        dtype: string
+        nullable: false
+        unique: false
+        tests: [ ]
+
+      - name: update_timestamp
+        description: "Timestamp of data point"
+        dtype: datetime
+        nullable: false
+        tests: [ ]
+
+      - name: amt
+        description: "Amount - must be non-negative"
+        dtype: float
+        nullable: false
+        tests:
+          - expect_column_values_to_be_between:
+              arguments:
+                min: 0
+                max: 999999
+              severity: ERROR
+          - expect_column_values_to_have_decimal_places:
+              arguments:
+                max_decimal_places: 2
+              severity: WARN
+
+      - name: ccy
+        description: "Currency code - must match allowed values"
+        dtype: string
+        nullable: false
+        tests:
+          - expect_column_value_length_equal_to:
+              arguments:
+                length: 3
+              severity: ERROR
+          - expect_column_values_to_be_in_set:
+              arguments:
+                allowed: [ "USD", "EUR", "GBP" ]
+              severity: ERROR
+
+      - name: projected_dt
+        description: "Projected Date - optional but must match if provided"
+        dtype: date
+        nullable: false
+        tests:
+          - expect_column_datetime_value_format:
+              arguments:
+                format: "%Y-%m-%d"
+              severity: WARN
+
+    tests:
+
+      - expect_table_row_count_to_be_between:
+          arguments:
+            min: 1
+          severity: ERROR
+      - expect_table_rows_to_be_unique:
+          severity: ERROR
+      - expect_table_column_count_to_equal:
+          arguments:
+            expected: 5
+          severity: WARN
+
+  # Asset 2: cash_balance_api_raw
+  - name: cash_balance_api_raw
+    type: database
+    description: "Persist validated API data to PostgreSQL"
+    group_name: RAW
+    tags:
+      source: "cash_balance_api"
+      persistence: "postgres"
+    depends_on: [ cash_balance_api ]
+
+    source:
+      resource: postgres_resource
+      table: price.cash_balance_raw
+
+    model:
+      materialization: incremental
+      incremental_strategy: append
+      on_schema_change: append_new_columns
+
+    columns:
+      - name: account_cd
+        dtype: string
+        expr: ref("account_cd")
+
+      - name: currency_code
+        dtype: string
+        expr: ref("ccy")
+
+      - name: projected_dt
+        dtype: date
+        expr: ref("projected_dt")
+
+      - name: amt
+        dtype: float
+        expr: ref("amt")
+
+      - name: source_updated_at
+        dtype: datetime
+        expr: pd.to_datetime(ref("update_timestamp"), errors="coerce", utc=True)
+
+      - name: ingested_at
+        dtype: datetime
+        expr: pd.Timestamp.utcnow()
+
+      - name: load_dt
+        dtype: date
+        expr: pd.Timestamp.utcnow().date()
+
+      - name: load_id
+        dtype: string
+        expr: context.run.run_id # This is a system variable that provides the unique run ID for this execution
+
+
+    metadata:
+      retention_days: 90
+
+  # Asset 3: cash_balance_stage
+  - name: cash_balance_stage
+    type: database
+    description: "Stage dimension with SCD Type 2 history"
+    group_name: stage
+    tags:
+      source: "api_and_file"
+      persistence: "postgres"
+    depends_on: [ cash_balance_api_raw, cash_balance_file_raw ]
+
+    source:
+      resource: postgres_resource
+      table: price.cash_balance_stage
+
+    model:
+      materialization: snapshot
+      strategy: check
+      unique_key: [ load_dt, portfolio_cd, projected_dt ]
+      check_cols: [ cash_balance_amt, ccy_cd ]
+      hard_deletes: invalidate
+      on_schema_change: append_new_columns   # ✅ snapshot-safe
+
+    columns:
+      - name: portfolio_cd
+        dtype: string
+        expr: ref("account_cd")
+
+      - name: projected_dt
+        dtype: date
+        expr: ref("projected_dt")
+
+      - name: cash_balance_amt
+        dtype: float
+        expr: ref("amt")
+
+      - name: ccy_cd
+        dtype: string
+        expr: ref("currency_code")
+
+      - name: load_dt
+        dtype: date
+        expr: ref("load_dt")
+
+      - name: load_id
+        dtype: string
+        expr: ref("load_id")
+
+  # ----------------------------------------------------------
+  # FILE -> Price File Ingestion
+  # ----------------------------------------------------------
+  # Asset 1: cash_balance_file
+  - name: cash_balance_file
+    type: file
+    description: "Read cash balance from daily CSV file drops"
+    group_name: source
+    partition_name: cash_balance_file_partition
+    tags:
+      source: "file_drop"
+
+    columns:
+
+      - name: fund_cd
+        description: "Maps to Fund Code"
+        dtype: string
+        nullable: false
+        unique: false
+        tests: [ ]
+
+      - name: timestamp
+        description: "Timestamp of data point"
+        dtype: datetime
+        nullable: false
+        tests: [ ]
+
+      - name: amount
+        description: "Amount - must be non-negative"
+        dtype: float
+        nullable: false
+        tests:
+          - expect_column_values_to_be_between:
+              arguments:
+                min: 0
+                max: 999999
+              severity: ERROR
+          - expect_column_values_to_have_decimal_places:
+              arguments:
+                max_decimal_places: 2
+              severity: WARN
+
+      - name: ccy_cd
+        description: "Currency code - must match allowed values"
+        dtype: string
+        nullable: false
+        tests:
+          - expect_column_value_length_equal_to:
+              arguments:
+                length: 3
+              severity: ERROR
+          - expect_column_values_to_be_in_set:
+              arguments:
+                allowed: [ "USD", "EUR", "GBP" ]
+              severity: ERROR
+
+      - name: p_dt
+        description: "Projected Date - optional but must match if provided"
+        dtype: date
+        nullable: false
+        tests:
+          - expect_column_datetime_value_format:
+              arguments:
+                format: "%Y-%m-%d"
+              severity: WARN
+
+      - name: file_name
+        description: "Processed File Name"
+        dtype: string
+        nullable: false
+
+
+  # Asset 2: cash_balance_file_raw
+  - name: cash_balance_file_raw
+    type: database
+    description: "Persist validated API data to PostgreSQL"
+    group_name: RAW
+    partition_name: cash_balance_file_partition
+
+    tags:
+      source: "cash_balance_file"
+      persistence: "postgres"
+    depends_on: [ cash_balance_file ]
+
+    source:
+      resource: postgres_resource
+      table: price.cash_balance_raw
+
+    model:
+      materialization: incremental
+      incremental_strategy: append
+      on_schema_change: append_new_columns
+
+    columns:
+      - name: account_cd
+        dtype: string
+        expr: ref("fund_cd")
+
+      - name: currency_code
+        dtype: string
+        expr: ref("ccy_cd")
+
+      - name: projected_dt
+        dtype: date
+        expr: ref("p_dt")
+
+      - name: amt
+        dtype: float
+        expr: ref("amount")
+
+      - name: source_updated_at
+        dtype: datetime
+        expr: pd.to_datetime(ref("timestamp"), errors="coerce", utc=True)
+
+      - name: ingested_at
+        dtype: datetime
+        expr: pd.Timestamp.utcnow()
+
+      - name: load_dt
+        dtype: date
+        expr: pd.Timestamp.utcnow().date()
+
+      - name: load_id
+        dtype: string
+        expr: context.run.run_id # This is a system variable that provides the unique run ID for this execution
+
+      - name: file_name
+        dtype: string
+        expr: ref("file_name")
+
+
+    metadata:
+      retention_days: 90
+
+# ============================================================
+# JOBS
+# ============================================================
+jobs:
+  - name: cash_balance_api_based_ingestion_pipeline
+    description: "API → RAW → STAGE"
+    flow:
+      definition: cash_balance_api >> cash_balance_api_raw >> cash_balance_stage
+      description: "Sequential ingestion and transformation"
+    tags:
+      pipeline_type: ingestion
+      frequency: "60s"
+
+  - name: cash_balance_file_based_ingestion_pipeline
+    description: "FILE → RAW → STAGE"
+    flow:
+      definition: cash_balance_file >> cash_balance_file_raw >> cash_balance_stage
+      description: "Sequential ingestion and transformation"
+    tags:
+      pipeline_type: ingestion
+      frequency: "60s"
+
+# ============================================================
+# SENSORS
+# ============================================================
+sensors:
+
+  - name: cash_balance_api_ingestion_sensor
+    type: polling
+    description: "Trigger API ingestion job every 60 seconds"
+    trigger:
+      type: job
+      target: cash_balance_api_based_ingestion_pipeline
+      minimum_interval_seconds: 6000
+      default_status: RUNNING
+
+  - name: cash_balance_file_drop_sensor
+    type: file_drop
+    description: "Watch for daily cash balance file drops"
+    trigger:
+      type: job
+      target: cash_balance_file_based_ingestion_pipeline
+      minimum_interval_seconds: 30
+      default_status: RUNNING
+    partition_name: cash_balance_file_partition
+    config:
+      file_path: "/Users/Manoj.Kumar.Pandey2/data/incoming/cash_balance/{rdd()}"
+      file_pattern: "cash_balance_{today()}_*.csv"

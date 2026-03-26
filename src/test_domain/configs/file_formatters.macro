@@ -1,0 +1,57 @@
+# ============================================================
+# FILE FORMATTERS (Snowflake-style reusable format definitions)
+# ============================================================
+file_formatters:
+
+  # --- General-purpose CSV ---
+  - name: csv_standard
+    type: csv
+    description: "Standard UTF-8 CSV with comma delimiter"
+    config:
+      delimiter: ","
+      encoding: "utf-8"
+      null_if: ["", "NULL", "N/A"]
+
+  - name: csv_pipe_delimited
+    type: csv
+    description: "Pipe-delimited CSV (common in finance)"
+    config:
+      delimiter: "|"
+      encoding: "utf-8"
+      null_if: ["", "NULL", "N/A"]
+
+  - name: csv_semicolon
+    type: csv
+    description: "Semicolon-delimited CSV (common in EU locales)"
+    config:
+      delimiter: ";"
+      encoding: "utf-8"
+      null_if: ["", "NULL", "N/A"]
+
+  - name: csv_tab_delimited
+    type: csv
+    description: "Tab-delimited text file"
+    config:
+      delimiter: "\t"
+      encoding: "utf-8"
+
+  - name: csv_with_header_skip
+    type: csv
+    description: "CSV with a metadata header row to skip"
+    config:
+      delimiter: ","
+      encoding: "utf-8"
+      skip_header: 1
+
+  # --- General-purpose JSON ---
+  - name: json_records
+    type: json
+    description: "JSON array of records (default pandas orient)"
+    config:
+      orient: "records"
+
+  - name: json_lines
+    type: json
+    description: "Newline-delimited JSON (one object per line)"
+    config:
+      lines: true

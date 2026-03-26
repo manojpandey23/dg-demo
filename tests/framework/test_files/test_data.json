@@ -1,0 +1,20 @@
+[
+  {
+    "account_cd": "ACC001",
+    "amount": 1500.5,
+    "ccy": "USD",
+    "date": "2026-03-21"
+  },
+  {
+    "account_cd": "ACC002",
+    "amount": 2300.0,
+    "ccy": "EUR",
+    "date": "2026-03-22"
+  },
+  {
+    "account_cd": "ACC003",
+    "amount": 780.25,
+    "ccy": "GBP",
+    "date": "2026-03-23"
+  }
+]

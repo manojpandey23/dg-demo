@@ -1,0 +1,289 @@
+# ============================================================
+# Cash Balance — File Ingestion Pipeline
+#
+# FILE drop → RAW persistence
+# ============================================================
+
+
+assets:
+
+  # ----------------------------------------------------------
+  # Asset 1: cash_balance_file (source)
+  # ----------------------------------------------------------
+  - name: cash_balance_file
+    type: file
+    description: "Read cash balance from daily CSV file drops"
+    group_name: source
+    partition_name: cash_balance_file_partition
+    file_format: csv_standard
+    tags:
+      source: "file_drop"
+
+    columns:
+
+      - name: fund_cd
+        description: "Maps to Fund Code"
+        dtype: string
+        nullable: false
+        unique: false
+        tests: [ ]
+
+      - name: timestamp
+        description: "Timestamp of data point"
+        dtype: datetime
+        nullable: false
+        tests: [ ]
+
+      - name: amount
+        description: "Amount - must be non-negative"
+        dtype: float
+        nullable: false
+        tests:
+          - expect_column_values_to_be_between:
+              arguments:
+                min: 0
+                max: 999999
+              severity: ERROR
+          - expect_column_values_to_have_decimal_places:
+              arguments:
+                max_decimal_places: 2
+              severity: WARN
+
+      - name: ccy_cd
+        description: "Currency code - must match allowed values"
+        dtype: string
+        nullable: false
+        tests:
+          - expect_column_value_length_equal_to:
+              arguments:
+                length: 3
+              severity: ERROR
+          - expect_column_values_to_be_in_set:
+              arguments:
+                allowed: [ "USD", "EUR", "GBP" ]
+              severity: ERROR
+
+      - name: p_dt
+        description: "Projected Date - optional but must match if provided"
+        dtype: date
+        nullable: false
+        tests:
+          - expect_column_datetime_value_format:
+              arguments:
+                format: "%Y-%m-%d"
+              severity: WARN
+
+      - name: file_name
+        description: "Processed File Name"
+        dtype: string
+        nullable: false
+
+  # ----------------------------------------------------------
+  # Asset 2: cash_balance_file_raw (RAW persistence)
+  # ----------------------------------------------------------
+  - name: cash_balance_file_raw
+    type: database
+    description: "Persist validated file data to PostgreSQL"
+    group_name: RAW
+    partition_name: cash_balance_file_partition
+    tags:
+      source: "cash_balance_file"
+      persistence: "postgres"
+    depends_on: [ cash_balance_file ]
+
+    source:
+      resource: postgres_resource
+      table: price.cash_balance_file_raw
+
+    model:
+      materialization: incremental
+      incremental_strategy: append
+      on_schema_change: append_new_columns
+
+    columns:
+      - name: fund_cd
+        dtype: string
+        expr: ref("fund_cd")
+
+      - name: ccy_cd
+        dtype: string
+        expr: ref("ccy_cd")
+
+      - name: p_dt
+        dtype: date
+        expr: ref("p_dt")
+
+      - name: amount
+        dtype: float
+        expr: ref("amount")
+
+      - name: timestamp
+        dtype: datetime
+        expr: ref("timestamp")
+
+      - name: ingested_at
+        dtype: datetime
+        expr: pd.Timestamp.utcnow()
+
+      - name: load_dt
+        dtype: date
+        expr: pd.Timestamp.utcnow().date()
+
+      - name: load_id
+        dtype: string
+        expr: context.run.run_id
+
+      - name: file_name
+        dtype: string
+        expr: ref("file_name")
+
+    metadata:
+      retention_days: 90
+
+  # ----------------------------------------------------------
+  # Asset 3: cash_balance_file_stage
+  # ----------------------------------------------------------
+  - name: cash_balance_file_stage
+    type: database
+    description: "Stage table for cash balance file data"
+    group_name: stage
+    tags:
+      source: "cash_balance_file_raw"
+      persistence: "postgres"
+    depends_on: [ cash_balance_file_raw ]
+
+    source:
+      resource: postgres_resource
+      table: price.cash_balance_stage
+
+    model:
+      materialization: snapshot
+      strategy: check
+      unique_key: [ load_dt, source, portfolio_cd, projected_dt, ccy_cd ]
+      check_cols: [ cash_balance_amt ]
+      hard_deletes: invalidate
+      on_schema_change: append_new_columns
+
+    columns:
+      - name: source
+        dtype: string
+        isKey: true
+        expr: value("FILE")
+
+      - name: portfolio_cd
+        dtype: string
+        isKey: true
+        expr: ref("fund_cd")
+
+      - name: projected_dt
+        dtype: date
+        isKey: true
+        expr: ref("p_dt")
+
+      - name: cash_balance_amt
+        dtype: float
+        expr: ref("amount")
+
+      - name: ccy_cd
+        dtype: string
+        isKey: true
+        expr: ref("ccy_cd")
+
+      - name: load_dt
+        dtype: date
+        isKey: true
+        expr: ref("load_dt")
+
+      - name: load_id
+        dtype: string
+        isKey: true
+        expr: ref("load_id")
+
+      - name: ingested_at
+        dtype: datetime
+        expr: pd.Timestamp.utcnow()
+
+  # ----------------------------------------------------------
+  # Asset 4: cash_balance_file_target (shared STAGE — SCD2 snapshot)
+  # ----------------------------------------------------------
+  - name: cash_balance_file_target
+    type: database
+    description: "Target dimension with SCD Type 2 history"
+    group_name: target
+    tags:
+      source: "cash_balance_file_stage"
+      persistence: "postgres"
+    depends_on: [ cash_balance_file_stage ]
+
+    source:
+      resource: postgres_resource
+      table: price.cash_balance_target
+
+    model:
+      materialization: snapshot
+      strategy: check
+      unique_key: [ portfolio_cd, projected_dt, ccy_cd ]
+      check_cols: [ cash_balance_amt ]
+      hard_deletes: invalidate
+      on_schema_change: append_new_columns
+
+    columns:
+      - name: portfolio_cd
+        dtype: string
+        is_key: true
+        expr: ref("portfolio_cd")
+
+      - name: projected_dt
+        dtype: date
+        is_key: true
+        expr: ref("projected_dt")
+
+      - name: cash_balance_amt
+        dtype: float
+        expr: ref("cash_balance_amt")
+
+      - name: ccy_cd
+        dtype: string
+        is_key: true
+        expr: ref("ccy_cd")
+
+      - name: load_dt
+        dtype: date
+        expr: ref("load_dt")
+
+      - name: load_id
+        dtype: string
+        is_key: true
+        expr: ref("load_id")
+
+# ============================================================
+# JOBS
+# ============================================================
+jobs:
+  - name: cash_balance_file_based_ingestion_pipeline
+    description: "FILE → RAW → STAGE → TARGET"
+    flow:
+      definition: cash_balance_file >> cash_balance_file_raw >> cash_balance_file_stage >> cash_balance_file_target
+      description: "Sequential ingestion and transformation"
+    tags:
+      pipeline_type: ingestion
+      frequency: "60s"
+
+# ============================================================
+# SENSORS
+# ============================================================
+sensors:
+
+  - name: cash_balance_file_drop_sensor
+    type: file_drop
+    description: "Watch for daily cash balance file drops"
+    trigger:
+      type: job
+      target: cash_balance_file_based_ingestion_pipeline
+      minimum_interval_seconds: 30
+      default_status: RUNNING
+    partition_name: cash_balance_file_partition
+    config:
+      file_path: "/Users/Manoj.Kumar.Pandey2/data/incoming/cash_balance/{rdd()}"
+      file_pattern: "cash_balance_{today()}_*.csv"
+

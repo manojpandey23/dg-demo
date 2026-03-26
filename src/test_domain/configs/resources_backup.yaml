@@ -1,0 +1,84 @@
+# Framework Resources Configuration (YAML-Driven)
+#
+# Users define all resources here. Resources are built programmatically
+# before assets are created. No Python code needed for resource setup!
+#
+# Resource types:
+#   - api: REST API client (requests.Session)
+#   - postgres: PostgreSQL connection (psycopg2)
+#   - config: YAML config file loader
+#   - http: Generic HTTP client
+#   - logger: Dagster logging
+
+version: "1.0"
+name: "price_domain_resources"
+description: "Resources for price domain pipeline"
+
+resources:
+
+  - name: vault_main
+    type: vault
+    config:
+      url: "https://vault.company.com:8200"
+      auth_type:
+        token:
+          token:
+            env: VAULT_TOKEN
+
+  # Resource 1: API Polling
+  - name: api_resource
+    type: api
+    description: "REST API client for pricing data"
+    config:
+      base_url: "http://localhost:8000"
+      timeout: 10
+      headers:
+        User-Agent: "DagsterFramework/1.0"
+  
+  # Resource 2: PostgreSQL Database
+  - name: postgres_resource
+    type: postgres
+    description: "PostgreSQL connection for data persistence"
+    credentials_from: vault_main
+    config:
+      host: "localhost"
+      port: 7432
+      database: "ods"
+      user: "ods"
+      password: "ods"
+      connect_timeout: 10
+#      secret_path: "secret/data/postgres/price"
+  
+  # Resource 3: Configuration Loader
+  - name: config_resource
+    type: config
+    description: "YAML configuration file loader"
+    config:
+      config_dir: "src/price_domain/configs"
+  
+  # Resource 4: Generic HTTP Client
+  - name: http_client_resource
+    type: http
+    description: "Generic HTTP client for any REST API"
+    config:
+      timeout: 30
+      verify_ssl: true
+      max_retries: 3
+  
+  # Resource 5: Logger
+  - name: logger_resource
+    type: logger
+    description: "Dagster logging resource"
+    config: {}
+
+# ============================================================
+# Environment Overrides (Optional)
+# ============================================================
+# In production, these can be overridden via environment variables
+# Example:
+#   export API_BASE_URL="https://api.production.com"
+#   export DB_HOST="prod-db.example.com"
+#
+# The ResourceBuilder will automatically pick up environment variables
+# and apply them when environment="prod"
+

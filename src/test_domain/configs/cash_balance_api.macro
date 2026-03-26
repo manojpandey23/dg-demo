@@ -1,0 +1,301 @@
+# ============================================================
+# Cash Balance — API Ingestion Pipeline
+#
+# API polling → RAW persistence → STAGE (SCD2 snapshot)
+# ============================================================
+
+assets:
+
+  # ----------------------------------------------------------
+  # Asset 1: cash_balance_api (source)
+  # ----------------------------------------------------------
+  - name: cash_balance_api
+    type: api
+    description: "Fetch cash balance from REST API"
+    group_name: source
+    tags:
+      source: "external_api"
+
+    source:
+      resource: api_resource
+      endpoint: /cash_balance
+      method: GET
+
+    columns:
+
+      - name: account_cd
+        description: "Maps to Fund Code"
+        dtype: string
+        nullable: false
+        unique: false
+        tests: [ ]
+
+      - name: update_timestamp
+        description: "Timestamp of data point"
+        dtype: datetime
+        nullable: false
+        tests: [ ]
+
+      - name: amt
+        description: "Amount - must be non-negative"
+        dtype: float
+        nullable: false
+        tests:
+          - expect_column_values_to_be_between:
+              arguments:
+                min: 0
+                max: 999999
+              severity: ERROR
+          - expect_column_values_to_have_decimal_places:
+              arguments:
+                max_decimal_places: 2
+              severity: WARN
+
+      - name: ccy
+        description: "Currency code - must match allowed values"
+        dtype: string
+        nullable: false
+        tests:
+          - expect_column_value_length_equal_to:
+              arguments:
+                length: 3
+              severity: ERROR
+          - expect_column_values_to_be_in_set:
+              arguments:
+                allowed: [ "USD", "EUR", "GBP" ]
+              severity: ERROR
+
+      - name: projected_dt
+        description: "Projected Date - optional but must match if provided"
+        dtype: date
+        nullable: false
+        tests:
+          - expect_column_datetime_value_format:
+              arguments:
+                format: "%Y-%m-%d"
+              severity: WARN
+
+    tests:
+
+      - expect_table_row_count_to_be_between:
+          arguments:
+            min: 1
+          severity: ERROR
+      - expect_table_rows_to_be_unique:
+          severity: ERROR
+      - expect_table_column_count_to_equal:
+          arguments:
+            expected: 5
+          severity: WARN
+
+  # ----------------------------------------------------------
+  # Asset 2: cash_balance_api_raw (RAW persistence)
+  # ----------------------------------------------------------
+  - name: cash_balance_api_raw
+    type: database
+    description: "Persist validated API data to PostgreSQL"
+    group_name: RAW
+    tags:
+      source: "cash_balance_api"
+      persistence: "postgres"
+    depends_on: [ cash_balance_api ]
+
+    source:
+      resource: postgres_resource
+      table: price.cash_balance_api_raw
+
+    model:
+      materialization: incremental
+      incremental_strategy: append
+      on_schema_change: append_new_columns
+
+    columns:
+      - name: account_cd
+        dtype: string
+        expr: ref("account_cd")
+
+      - name: currency_code
+        dtype: string
+        expr: ref("ccy")
+
+      - name: projected_dt
+        dtype: date
+        expr: ref("projected_dt")
+
+      - name: amt
+        dtype: float
+        expr: ref("amt")
+
+      - name: source_updated_at
+        dtype: datetime
+        expr: pd.to_datetime(ref("update_timestamp"), errors="coerce", utc=True)
+
+      - name: ingested_at
+        dtype: datetime
+        expr: pd.Timestamp.utcnow()
+
+      - name: load_dt
+        dtype: date
+        expr: pd.Timestamp.utcnow().date()
+
+      - name: load_id
+        dtype: string
+        expr: context.run.run_id
+
+    metadata:
+      retention_days: 90
+
+  # ----------------------------------------------------------
+  # Asset 3: cash_balance_api_stage
+  # ----------------------------------------------------------
+  - name: cash_balance_api_stage
+    type: database
+    description: "Stage table for cash balance api data"
+    group_name: stage
+    tags:
+      source: "cash_balance_api_raw"
+      persistence: "postgres"
+    depends_on: [ cash_balance_api_raw ]
+
+    source:
+      resource: postgres_resource
+      table: price.cash_balance_stage
+
+    model:
+      materialization: snapshot
+      strategy: check
+      unique_key: [ load_dt, source, portfolio_cd, projected_dt, ccy_cd ]
+      check_cols: [ cash_balance_amt ]
+      hard_deletes: invalidate
+      on_schema_change: append_new_columns
+
+    columns:
+      - name: source
+        dtype: string
+        isKey: true
+        expr: value("API")
+
+      - name: portfolio_cd
+        dtype: string
+        isKey: true
+        expr: ref("account_cd")
+
+      - name: projected_dt
+        dtype: date
+        isKey: true
+        expr: ref("projected_dt")
+
+      - name: cash_balance_amt
+        dtype: float
+        expr: ref("amt")
+
+      - name: ccy_cd
+        dtype: string
+        isKey: true
+        expr: ref("currency_code")
+
+      - name: load_dt
+        dtype: date
+        isKey: true
+        expr: ref("load_dt")
+
+      - name: load_id
+        dtype: string
+        isKey: true
+        expr: ref("load_id")
+
+      - name: ingested_at
+        dtype: datetime
+        expr: pd.Timestamp.utcnow()
+
+  # ----------------------------------------------------------
+  # Asset 4: cash_balance_api_target (shared STAGE — SCD2 snapshot)
+  # ----------------------------------------------------------
+  - name: cash_balance_api_target
+    type: database
+    description: "Target dimension with SCD Type 2 history"
+    group_name: target
+    tags:
+      source: "cash_balance_api_stage"
+      persistence: "postgres"
+      domain: "cash"
+      product: "cash_balance"
+    depends_on: [ cash_balance_api_stage ]
+
+    change_tracking: true
+    streams:
+      - type: websocket
+        relay_endpoint: "http://localhost:8000/ws/emit"
+
+    source:
+      resource: postgres_resource
+      table: price.cash_balance_target
+
+    model:
+      materialization: snapshot
+      strategy: check
+      unique_key: [ portfolio_cd, projected_dt, ccy_cd ]
+      check_cols: [ cash_balance_amt ]
+      hard_deletes: invalidate
+      on_schema_change: append_new_columns
+
+    columns:
+      - name: portfolio_cd
+        dtype: string
+        is_key: true
+        expr: ref("portfolio_cd")
+
+      - name: projected_dt
+        dtype: date
+        is_key: true
+        expr: ref("projected_dt")
+
+      - name: cash_balance_amt
+        dtype: float
+        expr: ref("cash_balance_amt")
+
+      - name: ccy_cd
+        dtype: string
+        is_key: true
+        expr: ref("ccy_cd")
+
+      - name: load_dt
+        dtype: date
+        expr: ref("load_dt")
+
+      - name: load_id
+        dtype: string
+        is_key: true
+        expr: ref("load_id")
+
+# ============================================================
+# JOBS
+# ============================================================
+jobs:
+  - name: cash_balance_api_based_ingestion_pipeline
+    description: "API → RAW → STAGE → TARGET"
+    flow:
+      definition: cash_balance_api >> cash_balance_api_raw >> cash_balance_api_stage >> cash_balance_api_target
+      description: "Sequential ingestion and transformation"
+    tags:
+      pipeline_type: ingestion
+      frequency: "60s"
+
+# ============================================================
+# SENSORS
+# ============================================================
+sensors:
+
+  - name: cash_balance_api_ingestion_sensor
+    type: api_polling
+    description: "Ping the cash-balance API; trigger ingestion only when the endpoint is healthy"
+    trigger:
+      type: job
+      target: cash_balance_api_based_ingestion_pipeline
+      minimum_interval_seconds: 300
+      default_status: RUNNING
+    config:
+      resource: api_resource
+      endpoint: /cash_balance
+      method: GET
+
