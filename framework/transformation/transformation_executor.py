@@ -54,7 +54,7 @@ def apply_transformations(
             )
 
             try:
-                output[out_col] = eval(expr, {}, scope)
+                output[out_col] = eval(expr, {"__builtins__": {}}, scope)  # noqa: S307
             except Exception as e:
                 raise ValueError(
                     f"Failed to evaluate expression for column '{out_col}': {expr}"

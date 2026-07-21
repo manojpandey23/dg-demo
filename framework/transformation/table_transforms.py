@@ -401,7 +401,7 @@ def apply_table_transform(
     """
     normalized = f"({expr_str.strip()})"
     scope = build_table_scope(df)
-    result = eval(normalized, {}, scope)
+    result = eval(normalized, {"__builtins__": {}}, scope)  # noqa: S307
 
     if isinstance(result, Frame):
         return result.df

@@ -13,19 +13,24 @@ class AssetBuilder:
 
     _or_bridge_map: dict[str, str] = {}
 
+    @classmethod
+    def reset(cls) -> None:
+        """Clear shared state between runs (important for tests)."""
+        cls._or_bridge_map = {}
+
     @staticmethod
     def build_assets(
         configs: list[AssetConfig],
         jobs_config,
         file_formatters: dict[str, FileFormatConfig] | None = None,
     ) -> list:
+        AssetBuilder.reset()
         asset_deps, or_groups = build_asset_dependencies(jobs_config)
 
         asset_deps, bridge_assets = AssetBuilder._apply_or_bridges(
             asset_deps, or_groups
         )
 
-        # ✅ Record OR‑bridge mapping
         AssetBuilder._or_bridge_map = {
             asset: f"__or_bridge_{asset}" for asset in or_groups
         }

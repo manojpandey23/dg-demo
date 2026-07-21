@@ -35,11 +35,11 @@ resources:
     description: "PostgreSQL connection for data persistence"
     credentials_from: vault_main
     config:
-      host: "localhost"
-      port: 7432
-      database: "ods"
-      user: "ods"
-      password: "ods"
+      host: ${POSTGRES_HOST:-localhost}
+      port: ${POSTGRES_PORT:-7432}
+      database: ${POSTGRES_DB:-ods}
+      user: ${POSTGRES_USER:-ods}
+      password: ${POSTGRES_PASSWORD}
       connect_timeout: 10
 
   - name: config_resource

@@ -1,0 +1,117 @@
+# ============================================================
+# Demo: Cash Balance Ingestion Pipeline
+# API → RAW (incremental append) → STAGE (table refresh)
+# ============================================================
+
+assets:
+
+  - name: cash_balance_api
+    type: api
+    description: "Fetch cash balance from mock API"
+    group_name: source
+    source:
+      resource: api_resource
+      endpoint: /cash_balance
+      method: GET
+    columns:
+      - name: account_cd
+        dtype: string
+        nullable: false
+      - name: update_timestamp
+        dtype: datetime
+        nullable: false
+      - name: amt
+        dtype: float
+        nullable: false
+      - name: ccy
+        dtype: string
+        nullable: false
+      - name: projected_dt
+        dtype: date
+        nullable: false
+    tests:
+      - expect_table_row_count_to_be_between:
+          arguments:
+            min: 1
+          severity: ERROR
+
+  - name: cash_balance_raw
+    type: database
+    description: "Persist API data to PostgreSQL (append)"
+    group_name: raw
+    depends_on: [cash_balance_api]
+    source:
+      resource: postgres_resource
+      table: price.cash_balance_raw
+    model:
+      materialization: incremental
+      incremental_strategy: append
+      on_schema_change: append_new_columns
+    columns:
+      - name: account_cd
+        dtype: string
+        expr: ref("account_cd")
+      - name: currency_code
+        dtype: string
+        expr: ref("ccy")
+      - name: projected_dt
+        dtype: date
+        expr: ref("projected_dt")
+      - name: amt
+        dtype: float
+        expr: ref("amt")
+      - name: ingested_at
+        dtype: datetime
+        expr: pd.Timestamp.utcnow()
+      - name: load_id
+        dtype: string
+        expr: context.run.run_id
+
+  - name: cash_balance_stage
+    type: database
+    description: "Staged cash balance (full refresh)"
+    group_name: stage
+    depends_on: [cash_balance_raw]
+    source:
+      resource: postgres_resource
+      table: price.cash_balance_stage
+    model:
+      materialization: table
+      on_schema_change: ignore
+    columns:
+      - name: account_cd
+        dtype: string
+        isKey: true
+        expr: ref("account_cd")
+      - name: currency_code
+        dtype: string
+        expr: ref("currency_code")
+      - name: projected_dt
+        dtype: date
+        expr: ref("projected_dt")
+      - name: amt
+        dtype: float
+        expr: ref("amt")
+      - name: ingested_at
+        dtype: datetime
+        expr: ref("ingested_at")
+
+jobs:
+  - name: demo_cash_balance_pipeline
+    description: "API → RAW → STAGE"
+    flow:
+      definition: cash_balance_api >> cash_balance_raw >> cash_balance_stage
+
+sensors:
+  - name: demo_cash_balance_sensor
+    type: api_polling
+    description: "Poll mock API and trigger pipeline"
+    trigger:
+      type: job
+      target: demo_cash_balance_pipeline
+      minimum_interval_seconds: 60
+      default_status: RUNNING
+    config:
+      resource: api_resource
+      endpoint: /cash_balance
+      method: GET

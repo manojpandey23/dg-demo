@@ -13,30 +13,18 @@ Coverage:
 """
 
 import os
-import sys
 
 import pandas as pd
 import psycopg2
 import pytest
 
-# ---------------------------------------------------------------------------
-# Path setup: the framework's internal imports use bare module names
-# (e.g. ``from model.config_models import …``), so the *framework/* directory
-# itself must be on sys.path.
-# ---------------------------------------------------------------------------
-_FRAMEWORK_DIR = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "framework")
-)
-if _FRAMEWORK_DIR not in sys.path:
-    sys.path.insert(0, _FRAMEWORK_DIR)
-
-from model.config_models import (
+from framework.model.config_models import (
     AssetSchema,
     IncrementalStrategy,
     Materialization,
     OnSchemaChange,
 )
-from postgres.schema.apply import (
+from framework.postgres.schema.apply import (
     apply_schema_and_materialize,
     is_object_exist,
 )

@@ -19,21 +19,17 @@ from framework.model.config_models import JobConfig
 class JobBuilder:
     """Factory for building Dagster jobs from configuration."""
 
-    # Internal cache: job name → topologically sorted asset names
-    _execution_orders: Dict[str, List[str]] = {}
+    _execution_orders: dict[str, list[str]] = {}
+
+    @classmethod
+    def reset(cls) -> None:
+        """Clear shared state between runs (important for tests)."""
+        cls._execution_orders = {}
 
     @staticmethod
-    def build_jobs(configs: List[JobConfig]) -> List[dg.UnresolvedAssetJobDefinition]:
-        """
-        Build a list of Dagster jobs from configurations.
-
-        Args:
-            configs: List of JobConfig objects.
-
-        Returns:
-            List of Dagster unresolved asset job definitions.
-        """
-        jobs: List[dg.UnresolvedAssetJobDefinition] = []
+    def build_jobs(configs: list[JobConfig]) -> list[dg.UnresolvedAssetJobDefinition]:
+        JobBuilder.reset()
+        jobs: list[dg.UnresolvedAssetJobDefinition] = []
         for config in configs:
             job = JobBuilder.build_job(config)
             if job is not None:

@@ -1,40 +1,20 @@
-#!/usr/bin/env python
-"""Test YAML-driven resources system"""
+"""Test YAML-driven resources system."""
 
-from src.price_domain.framework import FrameworkLoader
+from pathlib import Path
 
-try:
-    print("\n🧪 Testing YAML-Driven Resources System\n")
-    
-    # Initialize loader
-    loader = FrameworkLoader(
-        config_dir="../src/price_domain/configs",
-        resources_yaml="resources.yaml",
-        environment="local"
-    )
-    
-    print(f"✅ FrameworkLoaderV2 initialized")
-    print(f"✅ Resources loaded: {list(loader.resources.keys())}")
-    
-    # Try to get definitions
-    print(f"\n📖 Loading definitions from framework_pipeline_v2.yaml...")
-    defs = loader.get_definitions("framework_pipeline_v2.yaml")
-    
-    print(f"✅ Definitions loaded successfully!")
-    print(f"   - Assets: {len(defs.assets)}")
-    print(f"   - Jobs: {len(defs.jobs) if defs.jobs else 0}")
-    print(f"   - Sensors: {len(defs.sensors) if defs.sensors else 0}")
-    print(f"   - Resources: {len(defs.resources)}")
-    
-    # Print resource summary
-    print(f"\n🔌 Resources Available:")
-    for name in sorted(loader.resources.keys()):
-        print(f"   ✅ {name}")
-    
-    print(f"\n✅ YAML-DRIVEN RESOURCES SYSTEM WORKING!")
-    
-except Exception as e:
-    print(f"\n❌ Error: {e}")
-    import traceback
-    traceback.print_exc()
+import pytest
 
+from framework import FrameworkLoader
+
+
+@pytest.fixture
+def config_dir():
+    return Path(__file__).resolve().parents[2] / "src" / "test_domain" / "configs"
+
+
+def test_yaml_resources_load(config_dir):
+    if not config_dir.exists():
+        pytest.skip("test_domain configs not found")
+
+    loader = FrameworkLoader(config_dir=config_dir, environment="local")
+    assert "noop_io_manager" in loader.resources

@@ -516,7 +516,11 @@ def expect_plugin_validation(df, rule) -> ValidationResult:
     try:
         module = importlib.import_module("validation.validation_plugins")
 
+        if not hasattr(module, plugin_fn) or plugin_fn.startswith("_"):
+            raise ValueError(f"Plugin function '{plugin_fn}' not found or is private")
         fn = getattr(module, plugin_fn)
+        if not callable(fn):
+            raise ValueError(f"Plugin '{plugin_fn}' is not callable")
         passed, payload = fn(df, **args)
 
         return ValidationResult(

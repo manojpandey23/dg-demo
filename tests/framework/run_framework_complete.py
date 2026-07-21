@@ -1,43 +1,27 @@
-#!/usr/bin/env python3
-"""Test framework loading with jobs, sensors, and validations"""
+"""Complete framework loading test with validation registry check."""
 
-from src.price_domain.framework import FrameworkLoader
+from pathlib import Path
 
-try:
-    loader = FrameworkLoader(
-        config_dir='configs',
-        resources_yaml='resources.yaml',
-        environment='local'
-    )
-    
-    assets, jobs, sensors, checks = loader.load_from_file('framework_pipeline.yaml')
-    
-    print(f'\n✅ FRAMEWORK LOADED SUCCESSFULLY\n')
-    print(f'📊 Assets: {len(assets)}')
-    if assets:
-        for asset in assets:
-            print(f'   ├─ {asset.name}')
-    
-    print(f'\n⚙️  Jobs: {len(jobs)}')
-    if jobs:
-        for job in jobs:
-            print(f'   ├─ {job.name}')
-    
-    print(f'\n📡 Sensors: {len(sensors)}')
-    if sensors:
-        for sensor in sensors:
-            name = sensor.name if hasattr(sensor, 'name') else str(sensor)
-            print(f'   ├─ {name}')
-    
-    print(f'\n✔️  Validation Checks: {len(checks)}')
-    if checks:
-        for check in checks:
-            print(f'   ├─ {check.__name__ if hasattr(check, "__name__") else type(check).__name__}')
-    
-    print(f'\n✅ ALL COMPONENTS LOADED SUCCESSFULLY!')
-    
-except Exception as e:
-    print(f'\n❌ Error: {e}')
-    import traceback
-    traceback.print_exc()
+import pytest
 
+from framework import FrameworkLoader
+from framework.validation.engine.validation_registry import ValidationRegistry
+
+
+@pytest.fixture
+def config_dir():
+    return Path(__file__).resolve().parents[2] / "src" / "test_domain" / "configs"
+
+
+def test_framework_complete_load(config_dir):
+    if not config_dir.exists():
+        pytest.skip("test_domain configs not found")
+
+    loader = FrameworkLoader(config_dir=config_dir, environment="local")
+    defs = loader.get_definitions()
+    assert defs is not None
+
+
+def test_validation_registry_has_rules():
+    rules = ValidationRegistry.all()
+    assert len(rules) > 0, "No validation rules registered"
