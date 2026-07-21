@@ -5,11 +5,10 @@ import dagster as dg
 import pandas as pd
 from dagster import MetadataValue, TableColumnDep, TableColumnLineage
 
+from framework.backends import get_backend_for_resource
+from framework.cdc.capture import capture_cdc_events
 from framework.core.asserts.assert_registry import assert_handler
 from framework.model.config_models import AssertType, AssetConfig
-from framework.cdc.capture import capture_cdc_events
-from framework.postgres.schema.apply import apply_schema_and_materialize
-from framework.postgres.sql.ddl import begin_txn, commit_txn, rollback_txn
 from framework.transformation.system_context import build_system_context
 from framework.transformation.transformation_executor import apply_transformations
 
@@ -75,6 +74,9 @@ def handle_database_asset_v2(
     upstream_keys = asset_deps.get(config.name, [])
     ins = {f"input_{i}": dg.AssetIn(key=k) for i, k in enumerate(upstream_keys)}
 
+    resource_type = source.get("backend", "postgres")
+    backend = get_backend_for_resource(resource_type)
+
     @dg.asset(
         name=config.name,
         group_name=config.group_name,
@@ -88,11 +90,12 @@ def handle_database_asset_v2(
         **inputs: pd.DataFrame,
     ) -> pd.DataFrame:
 
-        db = context.resources.postgres_resource
-        cursor = db.cursor()
+        db = getattr(context.resources, resource)
+        backend.set_connection(db)
+        cursor = backend.get_cursor()
 
         try:
-            cursor.execute(begin_txn())
+            backend.begin_transaction(cursor)
             system_context = build_system_context(context)
 
             dfs: list[pd.DataFrame] = []
@@ -116,7 +119,7 @@ def handle_database_asset_v2(
                 else pd.concat(dfs, ignore_index=True, copy=False)
             )
 
-            op_meta = apply_schema_and_materialize(
+            op_meta = backend.apply_schema_and_materialize(
                 cursor=cursor,
                 table_fqn=table_fqn,
                 target_df=final_df,
@@ -141,13 +144,14 @@ def handle_database_asset_v2(
                     final_df=final_df,
                     run_id=context.run.run_id,
                     materialization_type=model.materialization.value,
+                    backend=backend,
                 )
                 context.log.info(
                     f"CDC: captured {cdc_count} change event(s) for "
                     f"'{config.name}'"
                 )
 
-            cursor.execute(commit_txn())
+            backend.commit_transaction(cursor)
 
             metadata = {
                 "rows": MetadataValue.int(op_meta["rows_loaded"]),
@@ -171,10 +175,10 @@ def handle_database_asset_v2(
             context.add_output_metadata(metadata)
 
         except Exception:
-            cursor.execute(rollback_txn())
+            backend.rollback_transaction(cursor)
             raise
         finally:
-            cursor.close()
+            backend.close_cursor(cursor)
 
         return final_df
 

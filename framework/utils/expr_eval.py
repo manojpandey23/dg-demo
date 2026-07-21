@@ -22,6 +22,7 @@ no changes to the evaluator are needed.
 from __future__ import annotations
 
 import datetime as dt
+import os
 import re
 from typing import Callable, Final
 
@@ -112,20 +113,43 @@ def today(format: str = _DEFAULT_FORMAT) -> str:
 # Template evaluation
 # ------------------------------------------------------------------
 
+# Matches ${VAR:-default} and ${VAR} env var references
+_ENV_RE: Final[re.Pattern[str]] = re.compile(
+    r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-(.*?))?\}"
+)
+
 # Matches any {expression} placeholder (non-greedy, no nested braces)
 _EXPR_RE: Final[re.Pattern[str]] = re.compile(r"\{([^}]+)\}")
 
 
-def evaluate_expr(template: str) -> str:
-    """Evaluate all ``{expression}`` placeholders in a template string.
+def _resolve_env_vars(template: str) -> str:
+    """Resolve ``${VAR:-default}`` and ``${VAR}`` patterns using os.environ."""
 
-    Each expression inside ``{…}`` is evaluated via ``eval()`` with
-    only the registered expression functions in scope.
+    def _replace_env(m: re.Match[str]) -> str:
+        var_name = m.group(1)
+        default = m.group(2)
+        env_val = os.environ.get(var_name)
+        if env_val is not None:
+            return env_val
+        if default is not None:
+            return default
+        return m.group(0)
+
+    return _ENV_RE.sub(_replace_env, template)
+
+
+def evaluate_expr(template: str) -> str:
+    """Evaluate all placeholders in a template string.
+
+    First resolves ``${VAR:-default}`` env-var references, then evaluates
+    any remaining ``{fn()}`` expression placeholders via the function
+    registry.
 
     Parameters
     ----------
     template:
-        String that may contain ``{fn()}`` or ``{fn('arg')}`` placeholders.
+        String that may contain ``${VAR:-default}`` env-var references
+        and/or ``{fn()}`` or ``{fn('arg')}`` placeholders.
 
     Returns
     -------
@@ -143,6 +167,7 @@ def evaluate_expr(template: str) -> str:
     >>> evaluate_expr("report_{today(format='yyyy_mm_dd')}.csv")
     'report_2026_03_21.csv'
     """
+    resolved = _resolve_env_vars(template)
 
     def _replace(match: re.Match[str]) -> str:
         expr = match.group(1).strip()
@@ -154,4 +179,4 @@ def evaluate_expr(template: str) -> str:
                 f"Failed to evaluate expression '{expr}' in template '{template}': {e}"
             ) from e
 
-    return _EXPR_RE.sub(_replace, template)
+    return _EXPR_RE.sub(_replace, resolved)

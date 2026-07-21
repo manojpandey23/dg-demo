@@ -10,6 +10,7 @@ class ResourceType(str, Enum):
     file_system = "file_system"
     event = "event"
     postgres = "postgres"
+    snowflake = "snowflake"
     s3 = "s3"
     vault = "vault"
     config = "config"

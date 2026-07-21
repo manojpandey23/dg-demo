@@ -12,10 +12,43 @@ File extensions (all YAML under the hood):
 
 from __future__ import annotations
 
+import os
+import re
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+_ENV_RE: re.Pattern[str] = re.compile(
+    r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-(.*?))?\}"
+)
+
+
+def _resolve_env(value: str) -> str:
+    """Resolve ``${VAR:-default}`` and ``${VAR}`` patterns using os.environ."""
+
+    def _replace(m: re.Match[str]) -> str:
+        var_name = m.group(1)
+        default = m.group(2)
+        env_val = os.environ.get(var_name)
+        if env_val is not None:
+            return env_val
+        if default is not None:
+            return default
+        return m.group(0)
+
+    return _ENV_RE.sub(_replace, value)
+
+
+def _resolve_config(obj: Any) -> Any:
+    """Walk a config structure and resolve env vars in all string values."""
+    if isinstance(obj, str):
+        return _resolve_env(obj)
+    if isinstance(obj, dict):
+        return {k: _resolve_config(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_resolve_config(item) for item in obj]
+    return obj
 
 
 # ------------------------------------------------------------------
@@ -47,12 +80,12 @@ _MERGEABLE_SECTIONS = ("file_formatters", "assets", "jobs", "sensors")
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
-    """Parse a YAML file and return its contents as a dict."""
+    """Parse a YAML file, resolve env vars, and return its contents."""
     with open(path, "r") as f:
         data = yaml.safe_load(f) or {}
     if not isinstance(data, dict):
         raise ValueError(f"Expected a YAML mapping in {path}, got {type(data).__name__}")
-    return data
+    return _resolve_config(data)
 
 
 def _check_duplicates(

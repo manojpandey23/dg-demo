@@ -7,7 +7,9 @@ change events to the per-asset change log table — all within the same
 transaction so the change log is atomically consistent with the data.
 """
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 
@@ -18,6 +20,9 @@ from framework.cdc.store import (
     persist_changes,
 )
 from framework.model.config_models import AssetConfig, AssetSchema
+
+if TYPE_CHECKING:
+    from framework.backends.base import DatabaseBackend
 
 
 def _extract_key_columns(columns: list[AssetSchema] | None) -> list[str]:
@@ -35,6 +40,7 @@ def capture_cdc_events(
     final_df: pd.DataFrame,
     run_id: str,
     materialization_type: str,
+    backend: DatabaseBackend | None = None,
 ) -> int:
     """Compute and persist CDC change events.
 
@@ -44,7 +50,7 @@ def capture_cdc_events(
     Parameters
     ----------
     cursor:
-        Open psycopg2 cursor within the active transaction.
+        Open database cursor within the active transaction.
     config:
         The ``AssetConfig`` with ``change_tracking: true``.
     table_fqn:
@@ -55,13 +61,20 @@ def capture_cdc_events(
         Dagster run ID for traceability.
     materialization_type:
         One of ``table``, ``incremental``, ``snapshot``.
+    backend:
+        Database backend for CDC store operations.  Falls back to the
+        Postgres-specific ``cdc.store`` module when ``None``.
 
     Returns
     -------
     Number of change events persisted.
     """
-    change_log_fqn = derive_change_log_table(table_fqn)
-    ensure_change_log_table(cursor, change_log_fqn)
+    if backend is not None:
+        change_log_fqn = backend.derive_change_log_table(table_fqn)
+        backend.ensure_change_log_table(cursor, change_log_fqn)
+    else:
+        change_log_fqn = derive_change_log_table(table_fqn)
+        ensure_change_log_table(cursor, change_log_fqn)
 
     key_columns = _extract_key_columns(config.columns)
 
@@ -87,6 +100,8 @@ def capture_cdc_events(
             run_id=run_id,
         )
 
+    if backend is not None:
+        return backend.persist_changes(cursor, change_log_fqn, events)
     return persist_changes(cursor, change_log_fqn, events)
 
 

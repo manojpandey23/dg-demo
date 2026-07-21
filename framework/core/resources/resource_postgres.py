@@ -9,7 +9,7 @@ from framework.model.resource_models import ResourceType
 @resource_handler(ResourceType.postgres)
 def build_postgres_resource_vault(name: str, config: dict) -> dg.ResourceDefinition:
     host = config["host"]
-    port = config.get("port", 5432)
+    port = int(config.get("port", 5432))
     database = config["database"]
 
     @dg.resource(required_resource_keys={"vault"} if "secret_path" in config else None)

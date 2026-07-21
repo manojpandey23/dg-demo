@@ -34,6 +34,9 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Application Frameworks",
 ]
 
+[project.optional-dependencies]
+snowflake = ["snowflake-connector-python[pandas]>=3.0"]
+
 [project.urls]
 Homepage = "https://github.com/manojpandey23/dg-demo"
 Repository = "https://github.com/manojpandey23/dg-demo"

@@ -1,0 +1,94 @@
+# ============================================================
+# Example 7: Mixed Backend Pipeline
+#
+# Demonstrates multi-database support — different assets in
+# the same pipeline target different database backends.
+#
+# Flow: API → Postgres (raw) → Snowflake (analytics)
+#
+# Each asset declares its backend via the source.backend key.
+# When omitted, defaults to "postgres" for backward compat.
+#
+# Prerequisites:
+#   pip install 'dagster-config-framework[snowflake]'
+#
+# Resources referenced:
+#   - api_resource       (from resources.resource)
+#   - postgres_resource  (from resources.resource)
+#   - snowflake_resource (from snowflake.resource — see below)
+# ============================================================
+
+assets:
+
+  - name: revenue_api
+    type: api
+    group_name: mixed_backend
+    source:
+      resource: api_resource
+      endpoint: /revenue
+      method: GET
+    columns:
+      - name: region
+        dtype: string
+      - name: amount
+        dtype: float
+      - name: report_date
+        dtype: date
+
+  # Land in Postgres (operational store)
+  - name: revenue_raw
+    type: database
+    group_name: mixed_backend
+    depends_on: [revenue_api]
+    source:
+      resource: postgres_resource
+      # backend: postgres  ← default, can be omitted
+      table: ops.revenue_raw
+    model:
+      materialization: incremental
+      incremental_strategy: append
+    columns:
+      - name: region
+        dtype: string
+        expr: ref("region")
+      - name: amount
+        dtype: float
+        expr: ref("amount")
+      - name: report_date
+        dtype: date
+        expr: ref("report_date")
+      - name: ingested_at
+        dtype: datetime
+        expr: pd.Timestamp.utcnow()
+
+  # Replicate to Snowflake (analytics warehouse)
+  - name: revenue_analytics
+    type: database
+    group_name: mixed_backend
+    depends_on: [revenue_raw]
+    source:
+      resource: snowflake_resource
+      backend: snowflake
+      table: analytics.revenue_analytics
+    model:
+      materialization: table
+      on_schema_change: ignore
+    columns:
+      - name: region
+        dtype: string
+        expr: ref("region")
+      - name: amount
+        dtype: float
+        expr: ref("amount")
+      - name: report_date
+        dtype: date
+        expr: ref("report_date")
+      - name: ingested_at
+        dtype: datetime
+        expr: ref("ingested_at")
+
+jobs:
+  - name: mixed_backend_pipeline
+    description: "API → Postgres → Snowflake"
+    flow:
+      definition: revenue_api >> revenue_raw >> revenue_analytics

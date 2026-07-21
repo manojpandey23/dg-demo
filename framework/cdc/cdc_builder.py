@@ -120,6 +120,7 @@ class CDCBuilder:
                         "asset_name": asset_cfg.name,
                         "table_fqn": table_fqn,
                         "topic": topic,
+                        "backend_type": source.get("backend", "postgres"),
                     },
                 )
 

@@ -14,7 +14,7 @@ from typing import Callable
 
 import dagster as dg
 
-from framework.cdc.store import fetch_pending_changes
+from framework.backends import get_backend_for_resource
 from framework.core.sensors.sensor_registry import sensor_handler
 from framework.model.config_models import SensorConfig, SensorType
 
@@ -38,6 +38,8 @@ def handle_cdc_sensor(config: SensorConfig) -> Callable:
     asset_name: str = cdc_cfg["asset_name"]
     table_fqn: str = cdc_cfg["table_fqn"]
     topic: str = cdc_cfg.get("topic", f"cdc.{asset_name}")
+    backend_type: str = cdc_cfg.get("backend_type", "postgres")
+    backend = get_backend_for_resource(backend_type)
 
     interval = config.trigger.minimum_interval_seconds or 10
 
@@ -55,20 +57,19 @@ def handle_cdc_sensor(config: SensorConfig) -> Callable:
         last_id = int(context.cursor or "0")
 
         db = getattr(context.resources, db_resource_key)
-        cursor = db.cursor()
+        backend.set_connection(db)
+        cursor = backend.get_cursor()
 
         try:
-            rows = fetch_pending_changes(
+            rows = backend.fetch_pending_changes(
                 cursor=cursor,
                 change_log_fqn=change_log_table,
                 last_id=last_id,
                 limit=batch_size,
             )
-            # Commit so any auto-created DDL (CREATE TABLE IF NOT EXISTS)
-            # from ensure_change_log_table is persisted.
             db.commit()
         finally:
-            cursor.close()
+            backend.close_cursor(cursor)
 
         if not rows:
             return
