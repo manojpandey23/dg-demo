@@ -1,0 +1,101 @@
+# ============================================================
+# Example 1: API Ingestion Pipeline
+#
+# A minimal pipeline that fetches JSON from a REST API,
+# validates the data, and persists it to a database table.
+#
+# Flow: API source -> validated raw table (incremental append)
+# ============================================================
+
+assets:
+
+  # Source asset — fetches data from a REST endpoint
+  - name: orders_api
+    type: api
+    description: "Fetch new orders from the orders API"
+    group_name: source
+    source:
+      resource: api_resource          # references a resource defined in .resource file
+      endpoint: /orders
+      method: GET
+    columns:
+      - name: order_id
+        dtype: string
+        nullable: false
+      - name: customer_id
+        dtype: string
+        nullable: false
+      - name: amount
+        dtype: float
+        nullable: false
+        tests:
+          - expect_column_values_to_be_between:
+              arguments: { min: 0 }
+              severity: ERROR
+      - name: currency
+        dtype: string
+        nullable: false
+        tests:
+          - expect_column_value_length_equal_to:
+              arguments: { length: 3 }
+      - name: order_date
+        dtype: date
+    tests:
+      - expect_table_row_count_to_be_between:
+          arguments: { min: 1 }
+
+  # Database asset — transforms and persists API data
+  - name: orders_raw
+    type: database
+    description: "Persist validated orders to the raw layer"
+    group_name: raw
+    depends_on: [orders_api]
+    source:
+      resource: postgres_resource
+      table: warehouse.orders_raw
+    model:
+      materialization: incremental
+      incremental_strategy: append
+      on_schema_change: append_new_columns
+    columns:
+      - name: order_id
+        dtype: string
+        expr: ref("order_id")        # pass-through from upstream
+      - name: customer_id
+        dtype: string
+        expr: ref("customer_id")
+      - name: amount
+        dtype: float
+        expr: ref("amount")
+      - name: currency
+        dtype: string
+        expr: upper(ref("currency"))  # normalize to uppercase
+      - name: order_date
+        dtype: date
+        expr: ref("order_date")
+      - name: ingested_at
+        dtype: datetime
+        expr: pd.Timestamp.utcnow()  # system timestamp
+      - name: run_id
+        dtype: string
+        expr: context.run.run_id      # Dagster run tracking
+
+jobs:
+  - name: orders_ingestion
+    description: "Ingest orders from API to raw layer"
+    flow:
+      definition: orders_api >> orders_raw
+
+sensors:
+  - name: orders_polling_sensor
+    type: api_polling
+    description: "Poll orders API every 5 minutes"
+    trigger:
+      type: job
+      target: orders_ingestion
+      minimum_interval_seconds: 300
+      default_status: RUNNING
+    config:
+      resource: api_resource
+      endpoint: /orders
+      method: GET

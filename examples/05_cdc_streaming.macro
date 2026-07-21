@@ -1,0 +1,103 @@
+# ============================================================
+# Example 5: Change Data Capture with Streaming
+#
+# Demonstrates CDC (Change Data Capture) — the framework
+# detects row-level changes during materialization and
+# dispatches events to WebSocket or Kafka streams.
+#
+# Use case: push real-time updates to a dashboard or
+# downstream microservice whenever source data changes.
+# ============================================================
+
+assets:
+
+  - name: positions_api
+    type: api
+    description: "Fetch current portfolio positions"
+    group_name: source
+    source:
+      resource: api_resource
+      endpoint: /positions
+      method: GET
+    columns:
+      - name: portfolio_id
+        dtype: string
+        nullable: false
+      - name: instrument
+        dtype: string
+        nullable: false
+      - name: quantity
+        dtype: float
+        nullable: false
+      - name: market_value
+        dtype: float
+      - name: as_of_date
+        dtype: date
+
+  - name: positions_live
+    type: database
+    description: "Live positions with change tracking"
+    group_name: live
+    depends_on: [positions_api]
+
+    # Enable CDC — the framework captures INSERT/UPDATE/DELETE
+    # events and dispatches them to configured streams
+    change_tracking: true
+    streams:
+      - type: websocket
+        relay_endpoint: "ws://dashboard:8080/positions/feed"
+      - type: kafka
+        relay_endpoint: "kafka://broker:9092/positions-changes"
+        config:
+          acks: "all"
+          compression: "gzip"
+
+    source:
+      resource: postgres_resource
+      table: trading.positions_live
+    model:
+      materialization: incremental
+      incremental_strategy: merge
+      unique_key: [portfolio_id, instrument]
+      on_schema_change: append_new_columns
+    columns:
+      - name: portfolio_id
+        dtype: string
+        isKey: true
+        expr: ref("portfolio_id")
+      - name: instrument
+        dtype: string
+        isKey: true
+        expr: ref("instrument")
+      - name: quantity
+        dtype: float
+        expr: ref("quantity")
+      - name: market_value
+        dtype: float
+        expr: ref("market_value")
+      - name: as_of_date
+        dtype: date
+        expr: ref("as_of_date")
+      - name: updated_at
+        dtype: datetime
+        expr: pd.Timestamp.utcnow()
+
+jobs:
+  - name: positions_refresh
+    description: "Refresh positions and emit change events"
+    flow:
+      definition: positions_api >> positions_live
+
+sensors:
+  - name: positions_realtime_sensor
+    type: api_polling
+    description: "Poll positions every 60 seconds for near-realtime updates"
+    trigger:
+      type: job
+      target: positions_refresh
+      minimum_interval_seconds: 60
+      default_status: RUNNING
+    config:
+      resource: api_resource
+      endpoint: /positions
+      method: GET

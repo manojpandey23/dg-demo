@@ -1,0 +1,135 @@
+# ============================================================
+# Example 4: Transforms and Validations
+#
+# Demonstrates the full transform DSL and validation engine:
+# - Column-level expressions (ref, value, when, coalesce, hash_key)
+# - Table-level fluent transforms (filter, dedup, order_by)
+# - Pre/post transform hooks
+# - Comprehensive validation rules
+# ============================================================
+
+assets:
+
+  - name: trades_api
+    type: api
+    description: "Fetch trade data from upstream system"
+    group_name: source
+    source:
+      resource: api_resource
+      endpoint: /trades
+      method: GET
+    columns:
+      - name: trade_id
+        dtype: string
+        nullable: false
+        unique: true
+      - name: symbol
+        dtype: string
+        nullable: false
+      - name: side
+        dtype: string
+        nullable: false
+        tests:
+          - expect_column_values_to_be_in_set:
+              arguments:
+                allowed: ["BUY", "SELL"]
+              severity: ERROR
+      - name: quantity
+        dtype: float
+        nullable: false
+        tests:
+          - expect_column_values_to_be_between:
+              arguments: { min: 0.01 }
+              severity: ERROR
+      - name: price
+        dtype: float
+        nullable: false
+      - name: currency
+        dtype: string
+      - name: trade_date
+        dtype: datetime
+      - name: status
+        dtype: string
+    tests:
+      - expect_table_row_count_to_be_between:
+          arguments: { min: 1, max: 100000 }
+      - expect_table_rows_to_be_unique:
+          severity: ERROR
+
+  - name: trades_enriched
+    type: database
+    description: "Enriched trades with derived columns and quality filters"
+    group_name: stage
+    depends_on: [trades_api]
+    source:
+      resource: postgres_resource
+      table: warehouse.trades_enriched
+
+    model:
+      materialization: incremental
+      incremental_strategy: merge
+      unique_key: trade_id
+      on_schema_change: append_new_columns
+
+    # Table-level transforms run before and after column expressions
+    transforms:
+      pre: >
+        frame
+        .filter(col("status") != "CANCELLED")
+        .dedup(["trade_id"], keep="last")
+      post: >
+        frame
+        .order_by(desc("trade_date"))
+        .limit(50000)
+
+    columns:
+      # Pass-through columns
+      - name: trade_id
+        dtype: string
+        isKey: true
+        expr: ref("trade_id")
+
+      - name: symbol
+        dtype: string
+        expr: upper(ref("symbol"))
+
+      - name: side
+        dtype: string
+        expr: ref("side")
+
+      # Derived columns using transform functions
+      - name: notional
+        dtype: float
+        expr: ref("quantity") * ref("price")
+
+      - name: currency
+        dtype: string
+        expr: coalesce(ref("currency"), value("USD"))
+
+      - name: trade_date
+        dtype: datetime
+        expr: ref("trade_date")
+
+      # Conditional logic
+      - name: size_bucket
+        dtype: string
+        expr: >
+          when(ref("quantity") >= 10000, value("LARGE"),
+          when(ref("quantity") >= 1000, value("MEDIUM"),
+          value("SMALL")))
+
+      # Surrogate key from business keys
+      - name: trade_hash
+        dtype: string
+        expr: hash_key(ref("trade_id"), ref("symbol"), ref("trade_date"))
+
+      # System columns
+      - name: ingested_at
+        dtype: datetime
+        expr: pd.Timestamp.utcnow()
+
+jobs:
+  - name: trades_enrichment_pipeline
+    description: "Ingest and enrich trade data"
+    flow:
+      definition: trades_api >> trades_enriched

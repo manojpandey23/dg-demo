@@ -1,0 +1,85 @@
+# ============================================================
+# Example 6: Multi-Source Merge (Fan-In)
+#
+# Two independent sources (API + file) feed into a shared
+# staging table using the OR-bridge pattern:
+#
+#   api_source ──┐
+#                ├──> merged_stage
+#   file_source ─┘
+#
+# The framework resolves `a | b >> c` flow syntax into
+# proper Dagster dependency graphs.
+# ============================================================
+
+assets:
+
+  - name: revenue_api
+    type: api
+    description: "Revenue data from the billing API"
+    group_name: source
+    source:
+      resource: api_resource
+      endpoint: /revenue
+      method: GET
+    columns:
+      - name: account_id
+        dtype: string
+        nullable: false
+      - name: amount
+        dtype: float
+        nullable: false
+      - name: period
+        dtype: date
+
+  - name: revenue_file
+    type: file
+    description: "Revenue adjustments from daily CSV"
+    group_name: source
+    partition_name: revenue_files
+    file_format: csv_standard
+    columns:
+      - name: account_id
+        dtype: string
+        nullable: false
+      - name: amount
+        dtype: float
+        nullable: false
+      - name: period
+        dtype: date
+      - name: file_name
+        dtype: string
+
+  # Both sources merge into a single staging table
+  - name: revenue_stage
+    type: database
+    description: "Merged revenue from API and file sources"
+    group_name: stage
+    depends_on: [revenue_api, revenue_file]
+    source:
+      resource: postgres_resource
+      table: finance.revenue_stage
+    model:
+      materialization: table
+      on_schema_change: append_new_columns
+    columns:
+      - name: account_id
+        dtype: string
+        isKey: true
+        expr: ref("account_id")
+      - name: amount
+        dtype: float
+        expr: ref("amount")
+      - name: period
+        dtype: date
+        expr: ref("period")
+      - name: ingested_at
+        dtype: datetime
+        expr: pd.Timestamp.utcnow()
+
+jobs:
+  - name: revenue_merge_pipeline
+    description: "Merge API and file revenue into staging"
+    flow:
+      # OR-bridge: either source can trigger the merge
+      definition: revenue_api | revenue_file >> revenue_stage

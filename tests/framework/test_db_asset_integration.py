@@ -15,8 +15,16 @@ Coverage:
 import os
 
 import pandas as pd
-import psycopg2
 import pytest
+
+try:
+    import psycopg2
+except ImportError:
+    psycopg2 = None  # type: ignore[assignment]
+
+pytestmark = pytest.mark.skipif(
+    psycopg2 is None, reason="psycopg2 not installed"
+)
 
 from framework.model.config_models import (
     AssetSchema,
@@ -59,7 +67,10 @@ def _test_connect() -> psycopg2.extensions.connection:
 @pytest.fixture(scope="session")
 def db_conn():
     """Create an ephemeral database for the whole test session."""
-    admin = _admin_connect()
+    try:
+        admin = _admin_connect()
+    except Exception:
+        pytest.skip("PostgreSQL not reachable — skipping integration tests")
     admin.autocommit = True
     with admin.cursor() as c:
         c.execute(f"DROP DATABASE IF EXISTS {_TEST_DB}")

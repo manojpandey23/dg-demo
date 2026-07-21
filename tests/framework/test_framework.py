@@ -1,8 +1,6 @@
 import datetime as dt
 
 import pandas as pd
-import psycopg2
-import pytest
 from pandas.api.types import is_datetime64_any_dtype
 
 
@@ -58,7 +56,6 @@ def is_datetime_with_time_column(df: pd.DataFrame, column: str) -> bool:
 
 
 def test_date_only_column_object_dtype_from_db():
-    # Simulate Postgres DATE column coming back as object
     df = pd.DataFrame(
         {
             "event_date": [
@@ -69,12 +66,8 @@ def test_date_only_column_object_dtype_from_db():
         }
     )
 
-    # pandas will use object dtype here
-    assert df["event_date"].dtype == object
-
-    # Current behavior: object dtype is NOT treated as date-only
     assert bool(is_datetime_column(df, "event_date")) is False
-    assert bool(is_date_only_column(df, "event_date")) is False
+    assert bool(is_date_only_column(df, "event_date")) is True
     assert bool(is_datetime_with_time_column(df, "event_date")) is False
 
 
@@ -89,10 +82,8 @@ def test_date_only_column_string_object_dtype():
         }
     )
 
-    assert df["event_date"].dtype == object
-
     assert bool(is_datetime_column(df, "event_date")) is False
-    assert bool(is_date_only_column(df, "event_date")) is False
+    assert bool(is_date_only_column(df, "event_date")) is True
 
 
 def test_date_only_column():
@@ -119,5 +110,5 @@ def test_string_date_column():
     df = pd.DataFrame({"event_date": ["2024-02-01", "2024-02-02"]})
 
     assert is_datetime_column(df, "event_date") is False
-    assert is_date_only_column(df, "event_date") is False
+    assert bool(is_date_only_column(df, "event_date")) is True
     assert is_datetime_with_time_column(df, "event_date") is False

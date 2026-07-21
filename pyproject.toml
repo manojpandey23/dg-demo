@@ -19,6 +19,27 @@ dependencies = [
     "httpx>=0.28.1",
 ]
 
+authors = [
+    { name = "Manoj Pandey", email = "manojpandey23@gmail.com" },
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+
+[project.urls]
+Homepage = "https://github.com/manojpandey23/dg-demo"
+Repository = "https://github.com/manojpandey23/dg-demo"
+Issues = "https://github.com/manojpandey23/dg-demo/issues"
+Documentation = "https://github.com/manojpandey23/dg-demo#readme"
+
 [dependency-groups]
 dev = [
     "dagster-dg-cli",
@@ -59,6 +80,7 @@ ignore = ["E501", "S307", "S603", "S301"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]
+"tests/framework/test_db_asset_integration.py" = ["E402", "S608"]
 
 [tool.mypy]
 python_version = "3.10"
@@ -69,6 +91,9 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--tb=short -q"
+markers = [
+    "integration: tests requiring external services (Postgres, APIs)",
+]
 
 [tool.coverage.run]
 source = ["framework"]

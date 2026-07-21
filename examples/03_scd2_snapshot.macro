@@ -1,0 +1,122 @@
+# ============================================================
+# Example 3: SCD Type 2 Snapshot Pipeline
+#
+# Demonstrates slowly-changing dimension (SCD2) tracking:
+# when a source record changes, the old version is closed
+# and a new version is inserted with full audit history.
+#
+# Flow: API -> raw (append) -> dimension (SCD2 snapshot)
+# ============================================================
+
+assets:
+
+  - name: customers_api
+    type: api
+    description: "Fetch current customer records"
+    group_name: source
+    source:
+      resource: api_resource
+      endpoint: /customers
+      method: GET
+    columns:
+      - name: customer_id
+        dtype: string
+        nullable: false
+      - name: name
+        dtype: string
+      - name: email
+        dtype: string
+      - name: tier
+        dtype: string
+        tests:
+          - expect_column_values_to_be_in_set:
+              arguments:
+                allowed: ["bronze", "silver", "gold", "platinum"]
+      - name: region
+        dtype: string
+
+  - name: customers_raw
+    type: database
+    description: "Raw customer data (append-only audit trail)"
+    group_name: raw
+    depends_on: [customers_api]
+    source:
+      resource: postgres_resource
+      table: warehouse.customers_raw
+    model:
+      materialization: incremental
+      incremental_strategy: append
+      on_schema_change: append_new_columns
+    columns:
+      - name: customer_id
+        dtype: string
+        expr: ref("customer_id")
+      - name: name
+        dtype: string
+        expr: ref("name")
+      - name: email
+        dtype: string
+        expr: ref("email")
+      - name: tier
+        dtype: string
+        expr: ref("tier")
+      - name: region
+        dtype: string
+        expr: ref("region")
+      - name: ingested_at
+        dtype: datetime
+        expr: pd.Timestamp.utcnow()
+
+  # SCD Type 2 dimension table
+  # The framework automatically manages:
+  #   - valid_from / valid_to timestamps
+  #   - is_current flag
+  #   - is_deleted flag (for hard delete tracking)
+  - name: customers_dim
+    type: database
+    description: "Customer dimension with SCD Type 2 history"
+    group_name: dimension
+    depends_on: [customers_raw]
+    source:
+      resource: postgres_resource
+      table: warehouse.customers_dim
+    model:
+      materialization: snapshot
+      strategy: check
+      unique_key: customer_id                    # business key
+      check_cols: [name, email, tier, region]    # columns to monitor for changes
+      hard_deletes: invalidate                   # close row if record disappears
+      on_schema_change: append_new_columns
+    columns:
+      - name: customer_id
+        dtype: string
+        isKey: true
+        expr: ref("customer_id")
+      - name: name
+        dtype: string
+        expr: ref("name")
+      - name: email
+        dtype: string
+        expr: ref("email")
+      - name: tier
+        dtype: string
+        expr: ref("tier")
+      - name: region
+        dtype: string
+        expr: ref("region")
+
+jobs:
+  - name: customers_dimension_pipeline
+    description: "API -> raw -> SCD2 dimension"
+    flow:
+      definition: customers_api >> customers_raw >> customers_dim
+
+sensors:
+  - name: customers_refresh_sensor
+    type: schedule
+    description: "Refresh customer dimension daily"
+    trigger:
+      type: job
+      target: customers_dimension_pipeline
+      cron: "0 6 * * *"
+      default_status: RUNNING

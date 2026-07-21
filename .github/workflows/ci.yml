@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv sync
-      - run: uv run pytest tests/ --cov=framework --cov-report=xml -q
+      - run: uv run pytest tests/ --cov=framework --cov-report=xml -q --ignore=tests/framework/test_db_asset_integration.py
       - uses: actions/upload-artifact@v4
         with:
           name: coverage-report

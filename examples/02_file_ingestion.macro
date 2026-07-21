@@ -1,0 +1,90 @@
+# ============================================================
+# Example 2: File Drop Ingestion
+#
+# Watch for daily CSV file drops, validate them against a
+# schema, and load into a database table.
+#
+# Flow: CSV file -> validated raw table
+# ============================================================
+
+assets:
+
+  # File asset — reads from CSV files discovered by a sensor
+  - name: transactions_file
+    type: file
+    description: "Read daily transaction files"
+    group_name: source
+    partition_name: transactions_partition
+    file_format: csv_standard              # references a named file format
+    columns:
+      - name: txn_id
+        dtype: string
+        nullable: false
+      - name: account
+        dtype: string
+        nullable: false
+      - name: amount
+        dtype: float
+        nullable: false
+      - name: txn_date
+        dtype: date
+      - name: file_name
+        dtype: string
+        description: "Auto-populated by the framework"
+    tests:
+      - expect_table_rows_to_be_unique:
+          severity: ERROR
+
+  # Persist file data to database
+  - name: transactions_raw
+    type: database
+    description: "Append daily transactions to raw table"
+    group_name: raw
+    partition_name: transactions_partition
+    depends_on: [transactions_file]
+    source:
+      resource: postgres_resource
+      table: warehouse.transactions_raw
+    model:
+      materialization: incremental
+      incremental_strategy: append
+      on_schema_change: append_new_columns
+    columns:
+      - name: txn_id
+        dtype: string
+        expr: ref("txn_id")
+      - name: account
+        dtype: string
+        expr: ref("account")
+      - name: amount
+        dtype: float
+        expr: ref("amount")
+      - name: txn_date
+        dtype: date
+        expr: ref("txn_date")
+      - name: source_file
+        dtype: string
+        expr: ref("file_name")
+      - name: ingested_at
+        dtype: datetime
+        expr: pd.Timestamp.utcnow()
+
+jobs:
+  - name: transactions_file_pipeline
+    description: "File drop -> raw table"
+    flow:
+      definition: transactions_file >> transactions_raw
+
+sensors:
+  - name: transactions_file_sensor
+    type: file_drop
+    description: "Watch for daily transaction CSV drops"
+    partition_name: transactions_partition
+    trigger:
+      type: job
+      target: transactions_file_pipeline
+      minimum_interval_seconds: 30
+      default_status: RUNNING
+    config:
+      file_path: "/data/incoming/transactions/"
+      file_pattern: "transactions_*.csv"

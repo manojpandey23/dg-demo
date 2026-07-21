@@ -12,14 +12,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import dagster as dg
 import pandas as pd
 import pytest
 from pandas.api.types import (
     is_float_dtype,
-    is_integer_dtype,
     is_string_dtype,
 )
 
@@ -187,10 +186,24 @@ class TestCSVFileAsset:
 
         context.add_output_metadata.assert_called_once()
         metadata = context.add_output_metadata.call_args[0][0]
-        assert metadata["file_path"] == str(csv_file)
-        assert metadata["rows"] == EXPECTED_ROW_COUNT
-        assert metadata["file_type"] == ".csv"
-        assert "account_cd" in metadata["columns"]
+        file_path = metadata["file_path"]
+        if hasattr(file_path, "text"):
+            file_path = file_path.text
+        assert file_path == str(csv_file)
+        rows = metadata["rows"]
+        if hasattr(rows, "value"):
+            rows = rows.value
+        assert rows == EXPECTED_ROW_COUNT
+        file_type = metadata["file_type"]
+        if hasattr(file_type, "text"):
+            file_type = file_type.text
+        assert file_type == ".csv"
+        columns = metadata["columns"]
+        if hasattr(columns, "value"):
+            columns = columns.value
+        elif hasattr(columns, "text"):
+            columns = columns.text
+        assert "account_cd" in columns
 
 
 # ============================================================
@@ -293,7 +306,7 @@ class TestEdgeCases:
 
     def test_nonexistent_file_raises(self) -> None:
         fake = TEST_FILES_DIR / "nonexistent.csv"
-        with pytest.raises(Exception):
+        with pytest.raises((FileNotFoundError, ValueError, OSError)):
             _invoke_file_asset(fake)
 
 

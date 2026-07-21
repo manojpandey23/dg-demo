@@ -1,20 +1,20 @@
-"""
-Framework package for config-driven Dagster pipeline generation.
+"""Config-driven Dagster pipeline framework.
 
-This package provides a meta-framework for generating Dagster assets, jobs, and sensors
-from YAML configuration files. It abstracts the complexity of orchestration and validation
-into a simple configuration-based approach, similar to DBT but for any data source/destination.
+Build data pipelines from YAML configuration files. Define assets, jobs,
+sensors, and validations in .macro and .resource files — the framework
+compiles them into a fully functional Dagster deployment.
 
-Key modules:
-- config_models: Pydantic V2 models for config validation
-- resources_builder: Build resources from resources.yaml
-- framework_loader: Load resources and pipelines from YAML
-- asset_builder: Generate assets from V2 config
-- job_builder: Generate jobs from config
-- sensor_builder: Generate sensors from config
+Usage::
+
+    from pathlib import Path
+    from framework import FrameworkLoader
+
+    loader = FrameworkLoader(config_dir=Path("configs"))
+    defs = loader.get_definitions()
 """
 
 from framework.builder.core_loader import FrameworkLoader
 from framework.builder.resources_builder import ResourceBuilder
 
-__all__ = ["FrameworkLoader", "ResourceBuilder"]
+__version__ = "0.1.0"
+__all__ = ["FrameworkLoader", "ResourceBuilder", "__version__"]
