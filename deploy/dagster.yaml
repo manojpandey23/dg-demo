@@ -1,0 +1,41 @@
+# ============================================================
+# Dagster Instance Configuration
+#
+# Controls where Dagster stores its own metadata (runs, events,
+# schedules) — this is NOT your pipeline data.
+#
+# Place this file (or a copy) in $DAGSTER_HOME/dagster.yaml.
+# All values read from environment variables with sensible
+# defaults for the bundled docker-compose stack.
+#
+# To use your own Postgres instance, set these env vars:
+#   DAGSTER_PG_HOST, DAGSTER_PG_PORT, DAGSTER_PG_DB,
+#   DAGSTER_PG_USER, DAGSTER_PG_PASSWORD
+# ============================================================
+
+storage:
+  postgres:
+    postgres_db:
+      hostname:
+        env: DAGSTER_PG_HOST
+      port:
+        env: DAGSTER_PG_PORT
+      username:
+        env: DAGSTER_PG_USER
+      password:
+        env: DAGSTER_PG_PASSWORD
+      db_name:
+        env: DAGSTER_PG_DB
+
+run_launcher:
+  module: dagster.core.launcher
+  class: DefaultRunLauncher
+
+run_coordinator:
+  module: dagster.core.run_coordinator
+  class: QueuedRunCoordinator
+  config:
+    max_concurrent_runs: 10
+
+telemetry:
+  enabled: false

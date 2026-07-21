@@ -36,6 +36,7 @@ classifiers = [
 
 [project.optional-dependencies]
 snowflake = ["snowflake-connector-python[pandas]>=3.0"]
+deploy = ["dagster-postgres>=0.18", "dagster-webserver>=1.12"]
 
 [project.urls]
 Homepage = "https://github.com/manojpandey23/dg-demo"

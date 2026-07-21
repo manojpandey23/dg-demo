@@ -1,6 +1,8 @@
 # ── Stage 1: Build ──
 FROM python:3.12-slim AS builder
 
+ARG INSTALL_EXTRAS=""
+
 WORKDIR /app
 
 RUN pip install --no-cache-dir uv
@@ -8,7 +10,11 @@ RUN pip install --no-cache-dir uv
 COPY pyproject.toml uv.lock ./
 COPY framework/ framework/
 
-RUN uv sync --no-dev --frozen
+RUN if [ -n "$INSTALL_EXTRAS" ]; then \
+      uv sync --no-dev --frozen --extra "$INSTALL_EXTRAS"; \
+    else \
+      uv sync --no-dev --frozen; \
+    fi
 
 # ── Stage 2: Runtime ──
 FROM python:3.12-slim AS runtime
@@ -32,6 +38,6 @@ USER dagster
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD python -c "import framework; print('ok')" || exit 1
 
-EXPOSE 3000
+EXPOSE 3000 4000
 
 CMD ["dagster", "api", "grpc", "-h", "0.0.0.0", "-p", "4000"]

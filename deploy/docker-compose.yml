@@ -1,0 +1,173 @@
+# ============================================================
+# Production Deployment Stack
+#
+# Architecture:
+#   dagster-postgres  — Dagster metadata storage (runs, events)
+#   pipeline-postgres — Your pipeline data (assets write here)
+#   code-server       — gRPC code location (hot-reloadable)
+#   dagster-webserver — UI on port 3000
+#   dagster-daemon    — Schedules, sensors, run queue
+#   mock-api          — Demo API (remove in production)
+#
+# Usage:
+#   docker compose -f deploy/docker-compose.yml up -d
+#
+# To use your own Postgres for Dagster metadata:
+#   Set DAGSTER_PG_HOST, DAGSTER_PG_PORT, etc. and remove
+#   the dagster-postgres service.
+#
+# To push pipeline updates:
+#   1. Edit your .macro / .resource configs
+#   2. Run: docker compose -f deploy/docker-compose.yml
+#           restart code-server
+#   3. The webserver auto-detects the new definitions
+# ============================================================
+
+services:
+
+  # ── Dagster metadata storage ──
+  dagster-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${DAGSTER_PG_DB:-dagster}
+      POSTGRES_USER: ${DAGSTER_PG_USER:-dagster}
+      POSTGRES_PASSWORD: ${DAGSTER_PG_PASSWORD:-dagster}
+    ports:
+      - "${DAGSTER_PG_EXPOSE:-5433}:5432"
+    volumes:
+      - dagster_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DAGSTER_PG_USER:-dagster} -d ${DAGSTER_PG_DB:-dagster}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Pipeline data storage ──
+  pipeline-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ods}
+      POSTGRES_USER: ${POSTGRES_USER:-ods}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-demo_password}
+    ports:
+      - "${POSTGRES_EXPOSE:-7432}:5432"
+    volumes:
+      - pipeline_pgdata:/var/lib/postgresql/data
+      - ../demo/seed.sql:/docker-entrypoint-initdb.d/01-seed.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ods} -d ${POSTGRES_DB:-ods}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Code location server (gRPC) ──
+  # This is where your pipeline definitions run.
+  # Restart this container to pick up config changes.
+  code-server:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        INSTALL_EXTRAS: deploy
+    command: >
+      dagster api grpc
+        -h 0.0.0.0
+        -p 4000
+        -m demo.definitions
+    ports:
+      - "4000:4000"
+    environment:
+      POSTGRES_HOST: pipeline-postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-ods}
+      POSTGRES_USER: ${POSTGRES_USER:-ods}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-demo_password}
+      API_BASE_URL: http://mock-api:8000
+      FILE_DROP_DIR: /data/incoming/transactions
+    volumes:
+      - ../demo/configs:/opt/dagster/configs
+      - ../demo/definitions.py:/opt/dagster/definitions.py
+      - file_drop:/data/incoming/transactions
+    depends_on:
+      pipeline-postgres:
+        condition: service_healthy
+      mock-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Dagster webserver (UI) ──
+  dagster-webserver:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        INSTALL_EXTRAS: deploy
+    command: >
+      dagster-webserver
+        -h 0.0.0.0
+        -p 3000
+        -w /opt/dagster/dagster_home/workspace.yaml
+    ports:
+      - "${DAGSTER_UI_PORT:-3000}:3000"
+    environment:
+      DAGSTER_HOME: /opt/dagster/dagster_home
+      DAGSTER_PG_HOST: dagster-postgres
+      DAGSTER_PG_PORT: 5432
+      DAGSTER_PG_DB: ${DAGSTER_PG_DB:-dagster}
+      DAGSTER_PG_USER: ${DAGSTER_PG_USER:-dagster}
+      DAGSTER_PG_PASSWORD: ${DAGSTER_PG_PASSWORD:-dagster}
+    volumes:
+      - ./dagster.yaml:/opt/dagster/dagster_home/dagster.yaml:ro
+      - ./workspace.yaml:/opt/dagster/dagster_home/workspace.yaml:ro
+    depends_on:
+      dagster-postgres:
+        condition: service_healthy
+      code-server:
+        condition: service_started
+    restart: unless-stopped
+
+  # ── Dagster daemon (schedules, sensors, run queue) ──
+  dagster-daemon:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        INSTALL_EXTRAS: deploy
+    command: dagster-daemon run
+    environment:
+      DAGSTER_HOME: /opt/dagster/dagster_home
+      DAGSTER_PG_HOST: dagster-postgres
+      DAGSTER_PG_PORT: 5432
+      DAGSTER_PG_DB: ${DAGSTER_PG_DB:-dagster}
+      DAGSTER_PG_USER: ${DAGSTER_PG_USER:-dagster}
+      DAGSTER_PG_PASSWORD: ${DAGSTER_PG_PASSWORD:-dagster}
+    volumes:
+      - ./dagster.yaml:/opt/dagster/dagster_home/dagster.yaml:ro
+      - ./workspace.yaml:/opt/dagster/dagster_home/workspace.yaml:ro
+    depends_on:
+      dagster-postgres:
+        condition: service_healthy
+      code-server:
+        condition: service_started
+    restart: unless-stopped
+
+  # ── Mock API (demo only — remove in production) ──
+  mock-api:
+    build:
+      context: ../demo
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  dagster_pgdata:
+  pipeline_pgdata:
+  file_drop:

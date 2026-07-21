@@ -1,0 +1,15 @@
+# ============================================================
+# Workspace Configuration
+#
+# Tells the dagster-webserver and dagster-daemon where to find
+# code locations (the gRPC servers running your pipelines).
+#
+# Add more code locations to load multiple deployments into
+# one Dagster instance.
+# ============================================================
+
+load_from:
+  - grpc_server:
+      host: code-server
+      port: 4000
+      location_name: pipelines

@@ -695,6 +695,10 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+deploy = [
+    { name = "dagster-postgres" },
+    { name = "dagster-webserver" },
+]
 snowflake = [
     { name = "snowflake-connector-python", extra = ["pandas"] },
 ]
@@ -718,6 +722,8 @@ requires-dist = [
     { name = "dagster", specifier = "==1.12.12" },
     { name = "dagster-dbt" },
     { name = "dagster-hashicorp" },
+    { name = "dagster-postgres", marker = "extra == 'deploy'", specifier = ">=0.18" },
+    { name = "dagster-webserver", marker = "extra == 'deploy'", specifier = ">=1.12" },
     { name = "dbt-core" },
     { name = "dbt-postgres" },
     { name = "dt", specifier = ">=1.2.1" },
@@ -729,7 +735,7 @@ requires-dist = [
     { name = "pyyaml" },
     { name = "snowflake-connector-python", extras = ["pandas"], marker = "extra == 'snowflake'", specifier = ">=3.0" },
 ]
-provides-extras = ["snowflake"]
+provides-extras = ["snowflake", "deploy"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -846,6 +852,19 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/4d/9f/7acf2102a7301441e3dd6fa889444d6a5880978ad807bbb512a98642c7c7/dagster_pipes-1.12.12.tar.gz", hash = "sha256:f4d5daf2d9ec1b02f4c6f8b638372d20303a08369486394ec8662a4b6b927886", size = 21071, upload-time = "2026-01-22T19:55:25.981Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/64/58/4701ec7b8c97e37705594e8c5aa1ff5726a4e3d3b2352474cd435233bbc6/dagster_pipes-1.12.12-py3-none-any.whl", hash = "sha256:baaabc57039c7a202243022eb8e3cf99d09c102d8f86d1d50913d51ef26c6a18", size = 20846, upload-time = "2026-01-22T19:55:24.955Z" },
+]
+
+[[package]]
+name = "dagster-postgres"
+version = "0.28.12"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "dagster" },
+    { name = "psycopg2-binary" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4b/e5/266e762fe4c54e9a82faacc88de8e5c463ae0fcab1c82e05ac88a1a5fdcb/dagster_postgres-0.28.12.tar.gz", hash = "sha256:5fc375dd9ce952a63a7ab0b9c132b6c38b67601b3268fb2c31efc351a86afcc6", size = 16420, upload-time = "2026-01-22T20:01:09.62Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/20/cd/18801252d63b8bad58eff63cfcaca3ffc9c4fd4fbeed8845262f4e609f5d/dagster_postgres-0.28.12-py3-none-any.whl", hash = "sha256:9a59ff51c0dbb978f32d568fe61a1d6c27eca44ad0d913359ccb6816e1a0326f", size = 22954, upload-time = "2026-01-22T20:01:07.498Z" },
 ]
 
 [[package]]
