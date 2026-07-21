@@ -35,7 +35,7 @@ services:
       dagster-webserver
         -h 0.0.0.0
         -p 3000
-        -m demo_domain.definitions
+        -m definitions
     ports:
       - "3000:3000"
     environment:
@@ -46,8 +46,11 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-demo_password}
       API_BASE_URL: http://mock-api:8000
       DAGSTER_HOME: /opt/dagster/dagster_home
+      FILE_DROP_DIR: /data/incoming/transactions
     volumes:
-      - ./demo/demo_domain:/opt/dagster/demo_domain
+      - ./demo/definitions.py:/opt/dagster/definitions.py
+      - ./demo/configs:/opt/dagster/configs
+      - ./demo/sample_files:/data/incoming/transactions
     depends_on:
       postgres:
         condition: service_healthy

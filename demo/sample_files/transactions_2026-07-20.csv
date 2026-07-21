@@ -1,0 +1,9 @@
+txn_id,account,amount,txn_date,category
+TXN-001,ACC-100,1500.50,2026-07-20,salary
+TXN-002,ACC-100,45.99,2026-07-20,groceries
+TXN-003,ACC-200,2300.00,2026-07-20,transfer
+TXN-004,ACC-200,89.99,2026-07-20,utilities
+TXN-005,ACC-300,150.00,2026-07-20,dining
+TXN-006,ACC-100,12.50,2026-07-20,transport
+TXN-007,ACC-300,500.00,2026-07-20,rent
+TXN-008,ACC-200,34.99,2026-07-20,entertainment

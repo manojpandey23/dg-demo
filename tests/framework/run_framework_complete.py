@@ -10,12 +10,12 @@ from framework.validation.engine.validation_registry import ValidationRegistry
 
 @pytest.fixture
 def config_dir():
-    return Path(__file__).resolve().parents[2] / "src" / "test_domain" / "configs"
+    return Path(__file__).resolve().parents[2] / "demo" / "configs"
 
 
 def test_framework_complete_load(config_dir):
     if not config_dir.exists():
-        pytest.skip("test_domain configs not found")
+        pytest.skip("demo configs not found")
 
     loader = FrameworkLoader(config_dir=config_dir, environment="local")
     defs = loader.get_definitions()

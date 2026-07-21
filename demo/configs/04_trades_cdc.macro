@@ -1,0 +1,145 @@
+# ============================================================
+# Demo Pipeline 4: Trade Ingestion with CDC
+#
+# Fetch trade executions, enrich them, and persist with
+# change data capture enabled. CDC detects row-level changes
+# and dispatches events to a stream (WebSocket in this demo).
+#
+# Demonstrates:
+#   - Change Data Capture (change_tracking: true)
+#   - Stream dispatch configuration
+#   - Delete+insert incremental strategy
+#   - Complex transform expressions
+#   - Window function usage (not in CDC path, just in enrichment)
+#   - Pre-transform filtering (remove cancelled trades)
+#
+# Flow: API → enriched trades (delete+insert with CDC)
+# ============================================================
+
+assets:
+
+  - name: trades_api
+    type: api
+    description: "Fetch trade executions from mock API"
+    group_name: trades
+    source:
+      resource: api_resource
+      endpoint: /trades
+      method: GET
+    columns:
+      - name: trade_id
+        dtype: string
+        nullable: false
+      - name: symbol
+        dtype: string
+        nullable: false
+      - name: side
+        dtype: string
+        nullable: false
+        tests:
+          - expect_column_values_to_be_in_set:
+              arguments:
+                allowed: ["BUY", "SELL"]
+      - name: quantity
+        dtype: float
+        nullable: false
+        tests:
+          - expect_column_values_to_be_between:
+              arguments: { min: 1 }
+      - name: price
+        dtype: float
+        nullable: false
+      - name: currency
+        dtype: string
+      - name: trade_date
+        dtype: datetime
+      - name: status
+        dtype: string
+    tests:
+      - expect_table_row_count_to_be_between:
+          arguments: { min: 1 }
+
+  - name: trades_enriched
+    type: database
+    description: "Enriched trades with change tracking"
+    group_name: trades
+    depends_on: [trades_api]
+
+    change_tracking: true
+    streams:
+      - type: websocket
+        relay_endpoint: "ws://localhost:9090/trades/feed"
+
+    source:
+      resource: postgres_resource
+      table: demo.trades_enriched
+    model:
+      materialization: incremental
+      incremental_strategy: delete+insert
+      unique_key: trade_id
+      on_schema_change: append_new_columns
+
+    transforms:
+      pre: >
+        frame
+        .filter(col("status") != "CANCELLED")
+        .dedup(["trade_id"], keep="last")
+
+    columns:
+      - name: trade_id
+        dtype: string
+        isKey: true
+        expr: ref("trade_id")
+      - name: symbol
+        dtype: string
+        expr: upper(ref("symbol"))
+      - name: side
+        dtype: string
+        expr: ref("side")
+      - name: quantity
+        dtype: float
+        expr: ref("quantity")
+      - name: price
+        dtype: float
+        expr: ref("price")
+      - name: notional
+        dtype: float
+        expr: ref("quantity") * ref("price")
+      - name: currency
+        dtype: string
+        expr: coalesce(ref("currency"), value("USD"))
+      - name: trade_date
+        dtype: datetime
+        expr: ref("trade_date")
+      - name: size_bucket
+        dtype: string
+        expr: >
+          when(ref("quantity") >= 1000, value("LARGE"),
+          when(ref("quantity") >= 100, value("MEDIUM"),
+          value("SMALL")))
+      - name: trade_hash
+        dtype: string
+        expr: hash_key(ref("trade_id"), ref("symbol"), ref("trade_date"))
+      - name: ingested_at
+        dtype: datetime
+        expr: pd.Timestamp.utcnow()
+
+jobs:
+  - name: trades_pipeline
+    description: "API → enriched trades (with CDC)"
+    flow:
+      definition: trades_api >> trades_enriched
+
+sensors:
+  - name: trades_sensor
+    type: api_polling
+    description: "Poll trades API every 60 seconds"
+    trigger:
+      type: job
+      target: trades_pipeline
+      minimum_interval_seconds: 60
+      default_status: RUNNING
+    config:
+      resource: api_resource
+      endpoint: /trades
+      method: GET

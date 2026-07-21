@@ -2,7 +2,7 @@
 from pathlib import Path
 from framework.builder.core_loader import FrameworkLoader
 
-config_dir = Path("src/test_domain/configs")
+config_dir = Path("demo/configs")
 
 loader = FrameworkLoader(
     config_dir=config_dir,

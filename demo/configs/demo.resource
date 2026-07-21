@@ -1,9 +1,15 @@
-# Demo resources — configured via environment variables
+# ============================================================
+# Demo Resources
+#
+# Shared connections used by all demo pipelines.
+# In production you'd split these per domain or environment.
+# ============================================================
+
 resources:
 
   - name: api_resource
     type: api
-    description: "Mock API for demo cash balance data"
+    description: "Mock API serving synthetic data for all demo pipelines"
     config:
       base_url: ${API_BASE_URL:-http://localhost:8000}
       timeout: 10

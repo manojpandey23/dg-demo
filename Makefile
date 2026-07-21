@@ -1,4 +1,4 @@
-.PHONY: help install dev lint format typecheck test test-cov clean build docker-build docker-up docker-down demo
+.PHONY: help install dev lint format typecheck test test-cov clean build dagster-dev docker-build docker-up docker-down demo
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -34,8 +34,8 @@ clean: ## Remove build artifacts and caches
 build: ## Build the wheel package
 	uv build
 
-dagster-dev: ## Start Dagster webserver in dev mode
-	uv run dagster dev -m test_domain.definitions
+dagster-dev: ## Start Dagster dev server with all demo pipelines
+	uv run dagster dev -m demo.definitions
 
 docker-build: ## Build the Docker/Podman image
 	docker build -t dagster-config-framework:latest .
@@ -43,10 +43,21 @@ docker-build: ## Build the Docker/Podman image
 docker-up: ## Start the full demo stack (Postgres + API + Dagster)
 	docker compose up -d
 
-docker-down: ## Stop the demo stack
+docker-down: ## Stop the demo stack and remove volumes
 	docker compose down -v
 
-demo: docker-up ## Alias for docker-up — run the full demo
-	@echo "\n  Demo running at http://localhost:3000 (Dagster UI)"
-	@echo "  Mock API at http://localhost:8000"
-	@echo "  Postgres at localhost:7432\n"
+demo: docker-up ## Run the full demo stack
+	@echo ""
+	@echo "  Demo running — all 5 pipelines loaded"
+	@echo ""
+	@echo "  Dagster UI   http://localhost:3000"
+	@echo "  Mock API     http://localhost:8000"
+	@echo "  PostgreSQL   localhost:7432 (user: ods, db: ods)"
+	@echo ""
+	@echo "  Pipelines:"
+	@echo "    1. Cash Balance   — API ingestion (append + full refresh)"
+	@echo "    2. Orders         — transforms, merge, derived columns"
+	@echo "    3. Customers      — SCD Type 2 dimension with history"
+	@echo "    4. Trades         — CDC with change tracking"
+	@echo "    5. File Ingestion — CSV file drop with file formatters"
+	@echo ""

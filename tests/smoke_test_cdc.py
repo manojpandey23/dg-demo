@@ -24,7 +24,7 @@ print(f"T4 OK: valid CDC, streams={len(a.streams)}")
 
 from pathlib import Path
 from framework.builder.core_loader import FrameworkLoader
-loader = FrameworkLoader(config_dir=Path("src/test_domain/configs"), environment="local")
+loader = FrameworkLoader(config_dir=Path("demo/configs"), environment="local")
 defs = loader.get_definitions()
 cdc_assets = [x for x in loader._pipeline_config.assets if x.change_tracking]
 cdc_res = [k for k in loader.resources if k.startswith("__cdc_")]

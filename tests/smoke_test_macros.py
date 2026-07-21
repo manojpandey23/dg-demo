@@ -2,7 +2,7 @@
 from pathlib import Path
 from framework.builder.config_discovery import discover_files, load_and_merge
 
-config_dir = Path("src/test_domain/configs")
+config_dir = Path("demo/configs")
 
 resource_paths, macro_paths = discover_files(config_dir)
 

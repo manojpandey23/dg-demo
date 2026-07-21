@@ -9,12 +9,12 @@ from framework import FrameworkLoader
 
 @pytest.fixture
 def config_dir():
-    return Path(__file__).resolve().parents[2] / "src" / "test_domain" / "configs"
+    return Path(__file__).resolve().parents[2] / "demo" / "configs"
 
 
 def test_framework_loader_discovers_configs(config_dir):
     if not config_dir.exists():
-        pytest.skip("test_domain configs not found")
+        pytest.skip("demo configs not found")
 
     loader = FrameworkLoader(config_dir=config_dir, environment="local")
     defs = loader.get_definitions()

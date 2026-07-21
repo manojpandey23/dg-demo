@@ -1,14 +1,28 @@
 # ============================================================
-# Demo: Cash Balance Ingestion Pipeline
-# API → RAW (incremental append) → STAGE (table refresh)
+# Demo Pipeline 1: Cash Balance Ingestion
+#
+# The simplest pipeline — fetch JSON from an API and persist
+# to a database table using incremental append, then refresh
+# a staging table.
+#
+# Demonstrates:
+#   - API asset (data fetch)
+#   - Incremental append materialization
+#   - Table (full refresh) materialization
+#   - Column transforms: ref(), upper(), pd.Timestamp.utcnow()
+#   - Dagster run context: context.run.run_id
+#   - API polling sensor
+#   - Validation rules (between, in_set, length)
+#
+# Flow: API → raw (append) → stage (full refresh)
 # ============================================================
 
 assets:
 
   - name: cash_balance_api
     type: api
-    description: "Fetch cash balance from mock API"
-    group_name: source
+    description: "Fetch cash balances from mock API"
+    group_name: cash_balance
     source:
       resource: api_resource
       endpoint: /cash_balance
@@ -23,26 +37,34 @@ assets:
       - name: amt
         dtype: float
         nullable: false
+        tests:
+          - expect_column_values_to_be_between:
+              arguments: { min: 0 }
+              severity: ERROR
       - name: ccy
         dtype: string
         nullable: false
+        tests:
+          - expect_column_value_length_equal_to:
+              arguments: { length: 3 }
+          - expect_column_values_to_be_in_set:
+              arguments:
+                allowed: ["USD", "EUR", "GBP"]
       - name: projected_dt
         dtype: date
         nullable: false
     tests:
       - expect_table_row_count_to_be_between:
-          arguments:
-            min: 1
-          severity: ERROR
+          arguments: { min: 1 }
 
   - name: cash_balance_raw
     type: database
-    description: "Persist API data to PostgreSQL (append)"
-    group_name: raw
+    description: "Append cash balance data to raw layer"
+    group_name: cash_balance
     depends_on: [cash_balance_api]
     source:
       resource: postgres_resource
-      table: price.cash_balance_raw
+      table: demo.cash_balance_raw
     model:
       materialization: incremental
       incremental_strategy: append
@@ -53,28 +75,31 @@ assets:
         expr: ref("account_cd")
       - name: currency_code
         dtype: string
-        expr: ref("ccy")
+        expr: upper(ref("ccy"))
       - name: projected_dt
         dtype: date
         expr: ref("projected_dt")
       - name: amt
         dtype: float
         expr: ref("amt")
+      - name: source_updated_at
+        dtype: datetime
+        expr: pd.to_datetime(ref("update_timestamp"), errors="coerce", utc=True)
       - name: ingested_at
         dtype: datetime
         expr: pd.Timestamp.utcnow()
-      - name: load_id
+      - name: run_id
         dtype: string
         expr: context.run.run_id
 
   - name: cash_balance_stage
     type: database
-    description: "Staged cash balance (full refresh)"
-    group_name: stage
+    description: "Staged cash balance — full refresh"
+    group_name: cash_balance
     depends_on: [cash_balance_raw]
     source:
       resource: postgres_resource
-      table: price.cash_balance_stage
+      table: demo.cash_balance_stage
     model:
       materialization: table
       on_schema_change: ignore
@@ -97,19 +122,19 @@ assets:
         expr: ref("ingested_at")
 
 jobs:
-  - name: demo_cash_balance_pipeline
+  - name: cash_balance_pipeline
     description: "API → RAW → STAGE"
     flow:
       definition: cash_balance_api >> cash_balance_raw >> cash_balance_stage
 
 sensors:
-  - name: demo_cash_balance_sensor
+  - name: cash_balance_sensor
     type: api_polling
-    description: "Poll mock API and trigger pipeline"
+    description: "Poll cash balance API every 5 minutes"
     trigger:
       type: job
-      target: demo_cash_balance_pipeline
-      minimum_interval_seconds: 60
+      target: cash_balance_pipeline
+      minimum_interval_seconds: 300
       default_status: RUNNING
     config:
       resource: api_resource

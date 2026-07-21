@@ -1,0 +1,125 @@
+# ============================================================
+# Demo Pipeline 5: File Drop Ingestion
+#
+# Read CSV files from a directory, validate them, and persist
+# to a database table. Uses named file formatters for reusable
+# parsing rules.
+#
+# Demonstrates:
+#   - File assets (CSV reader)
+#   - Named file formatters (Snowflake-style)
+#   - File drop sensor (directory watcher)
+#   - Partition-based processing
+#   - Automatic file_name column injection
+#
+# To trigger this pipeline manually:
+#   1. Go to Jobs → file_ingestion_pipeline
+#   2. Use the partition selector to pick a CSV file path
+#   3. Or drop a CSV file in the watched directory
+#
+# Flow: CSV file → raw table (append)
+# ============================================================
+
+file_formatters:
+  - name: csv_standard
+    type: csv
+    description: "Standard comma-delimited CSV"
+    config:
+      delimiter: ","
+      encoding: "utf-8"
+      null_if: ["", "NULL", "N/A"]
+
+  - name: csv_pipe_delimited
+    type: csv
+    description: "Pipe-delimited CSV (common in finance feeds)"
+    config:
+      delimiter: "|"
+      encoding: "utf-8"
+      null_if: ["", "NULL", "N/A"]
+
+assets:
+
+  - name: transactions_file
+    type: file
+    description: "Read transaction CSV files"
+    group_name: file_ingestion
+    partition_name: transactions_partition
+    file_format: csv_standard
+    columns:
+      - name: txn_id
+        dtype: string
+        nullable: false
+      - name: account
+        dtype: string
+        nullable: false
+      - name: amount
+        dtype: float
+        nullable: false
+        tests:
+          - expect_column_values_to_be_between:
+              arguments: { min: 0 }
+      - name: txn_date
+        dtype: date
+      - name: category
+        dtype: string
+      - name: file_name
+        dtype: string
+
+  - name: transactions_raw
+    type: database
+    description: "Append transactions to raw table"
+    group_name: file_ingestion
+    partition_name: transactions_partition
+    depends_on: [transactions_file]
+    source:
+      resource: postgres_resource
+      table: demo.transactions_raw
+    model:
+      materialization: incremental
+      incremental_strategy: append
+      on_schema_change: append_new_columns
+    columns:
+      - name: txn_id
+        dtype: string
+        expr: ref("txn_id")
+      - name: account
+        dtype: string
+        expr: ref("account")
+      - name: amount
+        dtype: float
+        expr: ref("amount")
+      - name: txn_date
+        dtype: date
+        expr: ref("txn_date")
+      - name: category
+        dtype: string
+        expr: upper(ref("category"))
+      - name: source_file
+        dtype: string
+        expr: ref("file_name")
+      - name: ingested_at
+        dtype: datetime
+        expr: pd.Timestamp.utcnow()
+      - name: run_id
+        dtype: string
+        expr: context.run.run_id
+
+jobs:
+  - name: file_ingestion_pipeline
+    description: "File drop → raw table"
+    flow:
+      definition: transactions_file >> transactions_raw
+
+sensors:
+  - name: transactions_file_sensor
+    type: file_drop
+    description: "Watch for transaction CSV drops"
+    partition_name: transactions_partition
+    trigger:
+      type: job
+      target: file_ingestion_pipeline
+      minimum_interval_seconds: 30
+      default_status: RUNNING
+    config:
+      file_path: "${FILE_DROP_DIR:-/data/incoming/transactions}"
+      file_pattern: "transactions_*.csv"

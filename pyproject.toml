@@ -65,7 +65,7 @@ force-include = { "pyproject.toml" = "pyproject.toml" }
 directory_type = "project"
 
 [tool.dg.project]
-root_module = "test_domain"
+root_module = "demo"
 
 [tool.black]
 line-length = 88

@@ -1,0 +1,157 @@
+# ============================================================
+# Demo Pipeline 2: Order Ingestion with Transforms
+#
+# Fetch orders from an API, enrich with derived columns using
+# the transform DSL, and upsert into a database table.
+#
+# Demonstrates:
+#   - Incremental merge (upsert by unique key)
+#   - Derived columns: arithmetic expressions (quantity * price)
+#   - Conditional logic: when() for categorization
+#   - Surrogate keys: hash_key() from business columns
+#   - Coalesce for null handling
+#   - Table-level transforms: filter, dedup, order_by
+#   - Schema evolution: append_new_columns
+#
+# Flow: API → enriched orders (merge)
+# ============================================================
+
+assets:
+
+  - name: orders_api
+    type: api
+    description: "Fetch orders from mock API"
+    group_name: orders
+    source:
+      resource: api_resource
+      endpoint: /orders
+      method: GET
+    columns:
+      - name: order_id
+        dtype: string
+        nullable: false
+      - name: customer_id
+        dtype: string
+        nullable: false
+      - name: product_sku
+        dtype: string
+      - name: product_name
+        dtype: string
+      - name: quantity
+        dtype: float
+        nullable: false
+        tests:
+          - expect_column_values_to_be_between:
+              arguments: { min: 1 }
+      - name: unit_price
+        dtype: float
+      - name: amount
+        dtype: float
+        nullable: false
+      - name: currency
+        dtype: string
+      - name: order_date
+        dtype: date
+      - name: status
+        dtype: string
+    tests:
+      - expect_table_row_count_to_be_between:
+          arguments: { min: 1 }
+      - expect_table_rows_to_be_unique:
+          severity: WARN
+
+  - name: orders_enriched
+    type: database
+    description: "Enriched orders with derived columns (upsert)"
+    group_name: orders
+    depends_on: [orders_api]
+    source:
+      resource: postgres_resource
+      table: demo.orders_enriched
+    model:
+      materialization: incremental
+      incremental_strategy: merge
+      unique_key: order_id
+      on_schema_change: append_new_columns
+
+    transforms:
+      pre: >
+        frame
+        .filter(col("status") != "CANCELLED")
+        .dedup(["order_id"], keep="last")
+      post: >
+        frame
+        .order_by(desc("order_date"))
+
+    columns:
+      - name: order_id
+        dtype: string
+        isKey: true
+        expr: ref("order_id")
+
+      - name: customer_id
+        dtype: string
+        expr: ref("customer_id")
+
+      - name: product_sku
+        dtype: string
+        expr: ref("product_sku")
+
+      - name: product_name
+        dtype: string
+        expr: ref("product_name")
+
+      - name: quantity
+        dtype: float
+        expr: ref("quantity")
+
+      - name: unit_price
+        dtype: float
+        expr: ref("unit_price")
+
+      - name: total_amount
+        dtype: float
+        expr: ref("quantity") * ref("unit_price")
+
+      - name: currency
+        dtype: string
+        expr: coalesce(ref("currency"), value("USD"))
+
+      - name: order_date
+        dtype: date
+        expr: ref("order_date")
+
+      - name: size_bucket
+        dtype: string
+        expr: >
+          when(ref("quantity") >= 10, value("BULK"),
+          when(ref("quantity") >= 5, value("MEDIUM"),
+          value("SMALL")))
+
+      - name: order_hash
+        dtype: string
+        expr: hash_key(ref("order_id"), ref("customer_id"), ref("order_date"))
+
+      - name: ingested_at
+        dtype: datetime
+        expr: pd.Timestamp.utcnow()
+
+jobs:
+  - name: orders_pipeline
+    description: "API → enriched orders (merge)"
+    flow:
+      definition: orders_api >> orders_enriched
+
+sensors:
+  - name: orders_sensor
+    type: api_polling
+    description: "Poll orders API every 2 minutes"
+    trigger:
+      type: job
+      target: orders_pipeline
+      minimum_interval_seconds: 120
+      default_status: RUNNING
+    config:
+      resource: api_resource
+      endpoint: /orders
+      method: GET

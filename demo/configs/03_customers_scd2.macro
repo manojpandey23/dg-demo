@@ -1,0 +1,120 @@
+# ============================================================
+# Demo Pipeline 3: Customer Dimension (SCD Type 2)
+#
+# Fetch customer records and maintain a slowly-changing
+# dimension with full history tracking.
+#
+# Demonstrates:
+#   - Snapshot materialization (SCD Type 2)
+#   - Change detection on multiple columns
+#   - System-managed columns: valid_from, valid_to, is_current
+#   - Hard delete tracking (invalidate strategy)
+#   - Three-layer pattern: source → raw → dimension
+#
+# Run this pipeline multiple times — the customer tier and
+# region change randomly, so you'll see SCD2 versioning
+# in the dimension table.
+#
+# Flow: API → raw (append) → dimension (SCD2 snapshot)
+# ============================================================
+
+assets:
+
+  - name: customers_api
+    type: api
+    description: "Fetch current customer records"
+    group_name: customers
+    source:
+      resource: api_resource
+      endpoint: /customers
+      method: GET
+    columns:
+      - name: customer_id
+        dtype: string
+        nullable: false
+      - name: name
+        dtype: string
+      - name: email
+        dtype: string
+      - name: tier
+        dtype: string
+        tests:
+          - expect_column_values_to_be_in_set:
+              arguments:
+                allowed: ["bronze", "silver", "gold", "platinum"]
+      - name: region
+        dtype: string
+
+  - name: customers_raw
+    type: database
+    description: "Raw customer data (append-only audit trail)"
+    group_name: customers
+    depends_on: [customers_api]
+    source:
+      resource: postgres_resource
+      table: demo.customers_raw
+    model:
+      materialization: incremental
+      incremental_strategy: append
+      on_schema_change: append_new_columns
+    columns:
+      - name: customer_id
+        dtype: string
+        expr: ref("customer_id")
+      - name: name
+        dtype: string
+        expr: ref("name")
+      - name: email
+        dtype: string
+        expr: ref("email")
+      - name: tier
+        dtype: string
+        expr: ref("tier")
+      - name: region
+        dtype: string
+        expr: ref("region")
+      - name: ingested_at
+        dtype: datetime
+        expr: pd.Timestamp.utcnow()
+      - name: run_id
+        dtype: string
+        expr: context.run.run_id
+
+  - name: customers_dim
+    type: database
+    description: "Customer dimension — SCD Type 2 with change history"
+    group_name: customers
+    depends_on: [customers_raw]
+    source:
+      resource: postgres_resource
+      table: demo.customers_dim
+    model:
+      materialization: snapshot
+      strategy: check
+      unique_key: customer_id
+      check_cols: [name, email, tier, region]
+      hard_deletes: invalidate
+      on_schema_change: append_new_columns
+    columns:
+      - name: customer_id
+        dtype: string
+        isKey: true
+        expr: ref("customer_id")
+      - name: name
+        dtype: string
+        expr: ref("name")
+      - name: email
+        dtype: string
+        expr: ref("email")
+      - name: tier
+        dtype: string
+        expr: ref("tier")
+      - name: region
+        dtype: string
+        expr: ref("region")
+
+jobs:
+  - name: customers_dimension_pipeline
+    description: "API → raw → SCD2 dimension"
+    flow:
+      definition: customers_api >> customers_raw >> customers_dim
