@@ -173,7 +173,7 @@ class SnowflakeBackend(DatabaseBackend):
         incoming: dict[str, dict[str, Any]],
         on_schema_change: OnSchemaChange,
     ) -> bool:
-        from framework.postgres.schema.apply import diff_schema
+        from framework.backends.postgres.schema.apply import diff_schema
 
         existing = self._get_existing_schema(cursor, table_fqn)
         diff = diff_schema(existing, incoming)

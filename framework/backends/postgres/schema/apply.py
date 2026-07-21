@@ -7,7 +7,7 @@ from framework.model.config_models import (
     Materialization,
     OnSchemaChange,
 )
-from framework.postgres.pghelper import (
+from framework.backends.postgres.pghelper import (
     incremental_append,
     incremental_delete_insert,
     incremental_merge,
@@ -16,8 +16,8 @@ from framework.postgres.pghelper import (
     materialize_table_with_insert,
     snapshot_scd2,
 )
-from framework.postgres.schema.builder import build_pg_schema_from_config
-from framework.postgres.sql.ddl import (
+from framework.backends.postgres.schema.builder import build_pg_schema_from_config
+from framework.backends.postgres.sql.ddl import (
     add_column_sql,
     add_primary_key_sql,
     alter_column_type_sql,

@@ -1,4 +1,8 @@
-"""PostgresBackend — wraps the existing framework/postgres/ package."""
+"""PostgresBackend — full Postgres database backend.
+
+Contains DDL generators, bulk loaders (COPY FROM STDIN), schema drift
+detection, materialization strategies, and SCD2 snapshot logic.
+"""
 
 from __future__ import annotations
 
@@ -32,17 +36,17 @@ class PostgresBackend(DatabaseBackend):
         cursor.close()
 
     def begin_transaction(self, cursor: Any) -> None:
-        from framework.postgres.sql.ddl import begin_txn
+        from .sql.ddl import begin_txn
 
         cursor.execute(begin_txn())
 
     def commit_transaction(self, cursor: Any) -> None:
-        from framework.postgres.sql.ddl import commit_txn
+        from .sql.ddl import commit_txn
 
         cursor.execute(commit_txn())
 
     def rollback_transaction(self, cursor: Any) -> None:
-        from framework.postgres.sql.ddl import rollback_txn
+        from .sql.ddl import rollback_txn
 
         cursor.execute(rollback_txn())
 
@@ -61,7 +65,7 @@ class PostgresBackend(DatabaseBackend):
         check_cols: Optional[Union[List[str], str]] = None,
         hard_deletes: Optional[str] = None,
     ) -> Dict[str, Any]:
-        from framework.postgres.schema.apply import (
+        from .schema.apply import (
             apply_schema_and_materialize as pg_apply,
         )
 

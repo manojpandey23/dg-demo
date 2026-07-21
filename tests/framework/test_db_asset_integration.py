@@ -32,7 +32,7 @@ from framework.model.config_models import (
     Materialization,
     OnSchemaChange,
 )
-from framework.postgres.schema.apply import (
+from framework.backends.postgres.schema.apply import (
     apply_schema_and_materialize,
     is_object_exist,
 )

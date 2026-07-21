@@ -1,7 +1,7 @@
 from framework.model.config_models import AssetSchema, Materialization
 from typing import Dict, Any
 
-from framework.postgres.pghelper import extract_primary_keys
+from framework.backends.postgres.pghelper import extract_primary_keys
 
 
 def schema_dtype_to_pg(dtype: str) -> str:

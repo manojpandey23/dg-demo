@@ -88,16 +88,16 @@ dagster.Definitions
 | `engine/validation_registry.py` | Registry of validation rule implementations. |
 | `rules/validations.py` | Built-in rules: null, unique, between, in_set, pattern, row counts, etc. |
 
-### `framework/postgres/` — Schema and materialization
+### `framework/backends/` — Database backends
 
-This is the built-in database backend. Adding support for other databases (Snowflake, BigQuery, MySQL, DuckDB) means implementing the same interface — the config layer and transform DSL remain unchanged.
+Each database backend is a self-contained package under `framework/backends/`. The `DatabaseBackend` ABC defines the contract; backends register via the `@backend_handler` decorator. Per-asset backend selection happens through the `source.backend` key in YAML config (defaults to `"postgres"`).
 
 | Module | Responsibility |
 |--------|---------------|
-| `schema/apply.py` | Atomic DDL+DML: schema diffing, table creation, schema evolution, materialization dispatch. |
-| `schema/builder.py` | Converts Pydantic schema config to Postgres DDL types. |
-| `sql/ddl.py` | SQL generation functions (CREATE, ALTER, COPY, snapshot queries). |
-| `pghelper.py` | Low-level Postgres operations: COPY FROM, incremental merge, SCD2 snapshot. |
+| `base.py` | `DatabaseBackend` ABC — connection lifecycle, transactions, schema management, materialization, CDC. |
+| `registry.py` | `BackendRegistry` + `@backend_handler` decorator for backend auto-registration. |
+| `postgres/` | Postgres backend: DDL generation, COPY FROM bulk loading, schema drift, SCD2 snapshots. |
+| `snowflake.py` | Snowflake backend: `write_pandas()` bulk load, MERGE upsert, INFORMATION_SCHEMA introspection. |
 
 ### `framework/cdc/` — Change Data Capture
 

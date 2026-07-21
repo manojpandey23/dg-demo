@@ -30,7 +30,7 @@ def get_backend_for_resource(resource_type: str) -> DatabaseBackend:
 
 _package_dir = Path(__file__).parent
 for _module in pkgutil.iter_modules([str(_package_dir)]):
-    if not _module.ispkg and _module.name not in {"base", "registry"}:
+    if _module.name not in {"base", "registry"}:
         try:
             importlib.import_module(f"{__name__}.{_module.name}")
         except ImportError:
