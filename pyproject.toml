@@ -36,6 +36,7 @@ classifiers = [
 
 [project.optional-dependencies]
 snowflake = ["snowflake-connector-python[pandas]>=3.0"]
+s3 = ["boto3>=1.28"]
 deploy = ["dagster-postgres>=0.18", "dagster-webserver>=1.12"]
 
 [project.urls]

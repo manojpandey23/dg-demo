@@ -50,4 +50,8 @@ class PostgresResourceConfig(BaseModel):
 class S3ResourceConfig(BaseModel):
     bucket: str
     region: str = "us-east-1"
+    profile: Optional[str] = None
+    access_key: Optional[str] = None
+    secret_key: Optional[str] = None
+    endpoint_url: Optional[str] = None
     secret_path: Optional[str] = None

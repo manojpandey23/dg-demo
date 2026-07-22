@@ -1,0 +1,109 @@
+# ============================================================
+# Example 8: S3 File Drop Ingestion
+#
+# Watches an S3 prefix for new CSV files, reads them, and loads
+# into Postgres. Demonstrates:
+#   - S3 file sensor with ETag-based change detection
+#   - Dynamic prefix with date functions: incoming/{today()}/
+#   - Named file formatters
+#   - Partition-based processing (one run per file)
+#
+# Prerequisites:
+#   pip install 'dagster-config-framework[s3]'
+#
+# Resources referenced:
+#   - s3_resource   (from s3.resource)
+#   - postgres_resource
+# ============================================================
+
+file_formatters:
+  - name: csv_standard
+    type: csv
+    config:
+      delimiter: ","
+      encoding: "utf-8"
+      null_if: ["", "NULL", "N/A"]
+
+assets:
+
+  - name: s3_transactions_file
+    type: file
+    description: "Read transaction CSV from S3"
+    group_name: s3_ingestion
+    partition_name: s3_transactions_partition
+    file_format: csv_standard
+    columns:
+      - name: txn_id
+        dtype: string
+        nullable: false
+      - name: account
+        dtype: string
+      - name: amount
+        dtype: float
+      - name: txn_date
+        dtype: date
+      - name: file_name
+        dtype: string
+
+  - name: s3_transactions_raw
+    type: database
+    description: "Append S3 transactions to raw table"
+    group_name: s3_ingestion
+    partition_name: s3_transactions_partition
+    depends_on: [s3_transactions_file]
+    source:
+      resource: postgres_resource
+      table: demo.s3_transactions_raw
+    model:
+      materialization: incremental
+      incremental_strategy: append
+    columns:
+      - name: txn_id
+        dtype: string
+        expr: ref("txn_id")
+      - name: account
+        dtype: string
+        expr: ref("account")
+      - name: amount
+        dtype: float
+        expr: ref("amount")
+      - name: txn_date
+        dtype: date
+        expr: ref("txn_date")
+      - name: source_file
+        dtype: string
+        expr: ref("file_name")
+      - name: ingested_at
+        dtype: datetime
+        expr: pd.Timestamp.utcnow()
+
+jobs:
+  - name: s3_ingestion_pipeline
+    description: "S3 file drop → raw table"
+    flow:
+      definition: s3_transactions_file >> s3_transactions_raw
+
+sensors:
+  - name: s3_transactions_sensor
+    type: file_drop
+    description: "Watch S3 for daily transaction files"
+    partition_name: s3_transactions_partition
+    trigger:
+      type: job
+      target: s3_ingestion_pipeline
+      minimum_interval_seconds: 60
+    config:
+      # ── S3 source ──
+      source: s3
+      bucket: ${S3_BUCKET:-my-data-lake}
+      prefix: "incoming/transactions/{today()}/"
+      resource: s3_resource
+
+      # ── File matching ──
+      file_pattern: "transactions_*.csv"
+
+      # ── State tracking ──
+      # S3 uses ETag (content hash) by default — catches
+      # re-uploads with the same filename.
+      tracking:
+        strategy: checksum

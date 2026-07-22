@@ -699,6 +699,9 @@ deploy = [
     { name = "dagster-postgres" },
     { name = "dagster-webserver" },
 ]
+s3 = [
+    { name = "boto3" },
+]
 snowflake = [
     { name = "snowflake-connector-python", extra = ["pandas"] },
 ]
@@ -719,6 +722,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "boto3", marker = "extra == 's3'", specifier = ">=1.28" },
     { name = "dagster", specifier = "==1.12.12" },
     { name = "dagster-dbt" },
     { name = "dagster-hashicorp" },
@@ -735,7 +739,7 @@ requires-dist = [
     { name = "pyyaml" },
     { name = "snowflake-connector-python", extras = ["pandas"], marker = "extra == 'snowflake'", specifier = ">=3.0" },
 ]
-provides-extras = ["snowflake", "deploy"]
+provides-extras = ["snowflake", "s3", "deploy"]
 
 [package.metadata.requires-dev]
 dev = [

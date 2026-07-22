@@ -15,6 +15,7 @@ Usage::
 
 from framework.builder.core_loader import FrameworkLoader
 from framework.builder.resources_builder import ResourceBuilder
+from framework.utils.expr_eval import expr_function
 
 __version__ = "0.1.0"
-__all__ = ["FrameworkLoader", "ResourceBuilder", "__version__"]
+__all__ = ["FrameworkLoader", "ResourceBuilder", "expr_function", "__version__"]

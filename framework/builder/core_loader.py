@@ -50,6 +50,10 @@ class FrameworkLoader:
         files automatically.
     environment:
         ``"local"`` or ``"prod"``.  Affects resource overrides.
+    user_modules:
+        Optional list of dotted module paths to import at startup.
+        Functions decorated with ``@expr_function`` in these modules
+        become available in expression templates and sensor filters.
     """
 
     def __init__(
@@ -57,6 +61,7 @@ class FrameworkLoader:
         config_dir: Path,
         resources_yaml: str | None = None,
         environment: str = "local",
+        user_modules: list[str] | None = None,
     ) -> None:
         self.config_dir = Path(config_dir)
         self.resources_yaml = resources_yaml
@@ -64,6 +69,14 @@ class FrameworkLoader:
 
         self.resources: Dict[str, dg.ResourceDefinition] = {}
         self._pipeline_config: FrameworkPipelineConfig | None = None
+
+        if user_modules:
+            from framework.utils.expr_eval import load_user_modules
+
+            loaded = load_user_modules(*user_modules)
+            dg.get_dagster_logger().info(
+                f"Loaded {loaded} user module(s): {user_modules}"
+            )
 
         if self.resources_yaml:
             # Legacy: load a single resources file eagerly

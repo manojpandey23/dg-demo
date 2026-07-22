@@ -22,6 +22,7 @@ no changes to the evaluator are needed.
 from __future__ import annotations
 
 import datetime as dt
+import importlib
 import os
 import re
 from typing import Callable, Final
@@ -69,6 +70,33 @@ def expr_function(fn: Callable[..., str]) -> Callable[..., str]:
 def get_expr_registry() -> dict[str, Callable[..., str]]:
     """Return a shallow copy of the current expression function registry."""
     return dict(_EXPR_REGISTRY)
+
+
+def load_user_modules(*module_paths: str) -> int:
+    """Import user modules so their ``@expr_function`` decorators register.
+
+    Parameters
+    ----------
+    *module_paths:
+        Dotted Python module paths (e.g. ``"my_project.custom_functions"``).
+        Each module is imported; any functions decorated with
+        ``@expr_function`` inside it are automatically registered.
+
+    Returns
+    -------
+    Number of modules successfully loaded.
+    """
+    loaded = 0
+    for mod_path in module_paths:
+        try:
+            importlib.import_module(mod_path)
+            loaded += 1
+        except ImportError as e:
+            raise ImportError(
+                f"Cannot load user module '{mod_path}': {e}. "
+                f"Ensure it is importable from PYTHONPATH."
+            ) from e
+    return loaded
 
 
 # ------------------------------------------------------------------
