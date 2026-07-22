@@ -34,19 +34,27 @@ uv run pre-commit install
 ### Start the infrastructure
 
 The demo stack runs Postgres, a mock REST API, and Dagster in containers.
-Requires Docker (macOS/Linux) or Docker Desktop / Podman (Windows).
+Requires Docker, Podman, or Docker Desktop.
 
-**macOS / Linux:**
+**macOS / Linux (Docker):**
 
 ```bash
 make demo
 ```
 
-**Windows (PowerShell):**
+**macOS / Linux (Podman):**
+
+```bash
+make demo ENGINE=podman
+```
+
+**Windows (PowerShell — Docker or Podman):**
 
 ```powershell
 python manage.py reset
-docker compose up -d
+docker compose up -d            # Docker
+# or
+podman compose up -d            # Podman
 ```
 
 Once running:
@@ -95,10 +103,11 @@ After adding or removing pipelines, reload Dagster to pick up the changes:
 make pipeline-reload
 ```
 
-**Windows (PowerShell):**
+**Windows / Podman:**
 
-```powershell
-docker compose restart dagster-webserver
+```bash
+docker compose restart dagster-webserver    # Docker
+podman compose restart dagster-webserver    # Podman
 ```
 
 When running locally with `dagster dev`, hot-reload is automatic — no restart needed.
@@ -128,11 +137,13 @@ This loads every `.macro` and `.resource` file in `demo/configs/` — whatever y
 To wipe everything — containers, database, loaded pipelines — and start fresh:
 
 ```bash
-docker compose down -v
+docker compose down -v              # Docker
+podman compose down -v              # Podman
+
 python manage.py reset
 ```
 
-Then run `make demo` (macOS/Linux) or `docker compose up -d` (Windows) to start clean.
+Then run `make demo` (macOS/Linux) or `docker compose up -d` / `podman compose up -d` (Windows) to start clean.
 
 ---
 
@@ -752,15 +763,20 @@ make deploy-status                    # check status
 make deploy-down                      # stop everything
 ```
 
-### Windows (PowerShell + Podman)
+### Windows (PowerShell — Docker or Podman)
 
 ```powershell
 Copy-Item deploy\.env.example deploy\.env
 
+# Using the deploy script (auto-detects Docker or Podman)
 .\deploy\deploy.ps1 up               # start
 .\deploy\deploy.ps1 push             # push changes
 .\deploy\deploy.ps1 status           # check status
 .\deploy\deploy.ps1 down             # stop
+
+# Or directly with docker/podman compose
+docker compose -f deploy/docker-compose.yml up -d
+podman compose -f deploy/docker-compose.yml up -d
 ```
 
 ### Using your own Postgres for Dagster metadata
@@ -878,7 +894,8 @@ uv run black framework/ tests/                                   # auto-format
 uv run mypy framework/                                           # typecheck
 uv run pytest tests/                                             # run tests
 uv run pytest tests/ --cov=framework --cov-report=term-missing   # tests + coverage
-docker build -t dagster-config-framework:latest .                # build image
+docker build -t dagster-config-framework:latest .                # build image (Docker)
+podman build -t dagster-config-framework:latest .                # build image (Podman)
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
