@@ -683,6 +683,7 @@ dependencies = [
     { name = "dagster" },
     { name = "dagster-dbt" },
     { name = "dagster-hashicorp" },
+    { name = "dagster-webserver" },
     { name = "dbt-core" },
     { name = "dbt-postgres" },
     { name = "dt" },
@@ -710,7 +711,6 @@ snowflake = [
 dev = [
     { name = "black" },
     { name = "dagster-dg-cli" },
-    { name = "dagster-webserver" },
     { name = "mypy" },
     { name = "pandas-stubs", version = "2.3.3.260113", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "pandas-stubs", version = "3.0.3.260530", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -727,6 +727,7 @@ requires-dist = [
     { name = "dagster-dbt" },
     { name = "dagster-hashicorp" },
     { name = "dagster-postgres", marker = "extra == 'deploy'", specifier = ">=0.18" },
+    { name = "dagster-webserver", specifier = ">=1.12" },
     { name = "dagster-webserver", marker = "extra == 'deploy'", specifier = ">=1.12" },
     { name = "dbt-core" },
     { name = "dbt-postgres" },
@@ -745,7 +746,6 @@ provides-extras = ["snowflake", "s3", "deploy"]
 dev = [
     { name = "black", specifier = ">=25.12.0" },
     { name = "dagster-dg-cli" },
-    { name = "dagster-webserver" },
     { name = "mypy", specifier = ">=1.15" },
     { name = "pandas-stubs" },
     { name = "pre-commit", specifier = ">=4.0" },

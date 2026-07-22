@@ -94,7 +94,7 @@ assets:
 
   - name: cash_balance_stage
     type: database
-    description: "Staged cash balance — full refresh"
+    description: "Staged cash balance — full refresh (latest per account)"
     group_name: cash_balance
     depends_on: [cash_balance_raw]
     source:
@@ -103,6 +103,11 @@ assets:
     model:
       materialization: table
       on_schema_change: ignore
+    transforms:
+      pre: >
+        frame
+        .order_by(desc("ingested_at"))
+        .dedup(["account_cd"], keep="first")
     columns:
       - name: account_cd
         dtype: string

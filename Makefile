@@ -1,4 +1,4 @@
-.PHONY: help install dev lint format typecheck test test-cov clean build dagster-dev docker-build docker-up docker-down demo deploy-build deploy-up deploy-down deploy-push deploy-status pipeline-list pipeline-add pipeline-remove pipeline-reset
+.PHONY: help install dev lint format typecheck test test-cov clean build dagster-dev docker-build docker-up docker-down demo deploy-build deploy-up deploy-down deploy-push deploy-status pipeline-list pipeline-add pipeline-remove pipeline-reset pipeline-reload
 
 # ── Container engine (override with: make deploy-up ENGINE=podman) ──
 ENGINE  ?= docker
@@ -66,9 +66,13 @@ pipeline-remove: ## Unload pipelines (e.g., make pipeline-remove P="01")
 pipeline-reset: ## Unload all pipelines
 	@uv run python manage.py reset
 
-demo: docker-up ## Run the full demo stack
+pipeline-reload: ## Reload Dagster after adding/removing pipelines (Docker only)
+	@$(COMPOSE) restart dagster-webserver
+	@echo "  Dagster restarting — UI will be back in a few seconds"
+
+demo: pipeline-reset docker-up ## Run the full demo stack (starts empty)
 	@echo ""
-	@echo "  Demo infrastructure running"
+	@echo "  Demo infrastructure running — no pipelines loaded"
 	@echo ""
 	@echo "  Dagster UI   http://localhost:3000"
 	@echo "  Mock API     http://localhost:8000"
@@ -78,6 +82,8 @@ demo: docker-up ## Run the full demo stack
 	@echo "    make pipeline-list             See available pipelines"
 	@echo "    make pipeline-add P=\"01 02\"    Load specific pipelines"
 	@echo "    make pipeline-add P=all        Load all pipelines"
+	@echo "    make pipeline-reload           Reload Dagster after changes"
+	@echo "    make pipeline-reset            Unload everything"
 	@echo ""
 
 # ============================================================

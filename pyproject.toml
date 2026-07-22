@@ -6,6 +6,7 @@ description = "Config-driven Dagster pipeline framework — build data pipelines
 license = { text = "MIT" }
 dependencies = [
     "dagster==1.12.12",
+    "dagster-webserver>=1.12",
     "dagster-dbt",
     "dbt-core",
     "dbt-postgres",
@@ -48,7 +49,6 @@ Documentation = "https://github.com/manojpandey23/dg-demo#readme"
 [dependency-groups]
 dev = [
     "dagster-dg-cli",
-    "dagster-webserver",
     "black>=25.12.0",
     "pytest>=9.0.2",
     "pytest-cov>=6.0",

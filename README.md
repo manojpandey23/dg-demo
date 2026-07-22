@@ -40,7 +40,7 @@ Once running:
 
 ### Choose pipelines to load
 
-Use the pipeline manager to select which examples to run. The dev server hot-reloads — changes take effect immediately.
+Use the pipeline manager to select which examples to run.
 
 ```bash
 # See what's available
@@ -65,6 +65,14 @@ make pipeline-add P="01 02"
 make pipeline-remove P="01"
 make pipeline-reset
 ```
+
+After adding or removing pipelines, reload Dagster to pick up the changes:
+
+```bash
+make pipeline-reload                 # restarts the Dagster container
+```
+
+When running locally with `make dagster-dev`, hot-reload is automatic — no restart needed.
 
 Pipelines that need extra dependencies (S3, Snowflake) print setup instructions when added.
 

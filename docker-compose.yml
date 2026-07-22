@@ -32,7 +32,7 @@ services:
   dagster-webserver:
     build: .
     command: >
-      dagster-webserver
+      python -m dagster dev
         -h 0.0.0.0
         -p 3000
         -m definitions

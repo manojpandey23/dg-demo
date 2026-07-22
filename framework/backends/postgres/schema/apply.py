@@ -397,9 +397,14 @@ def _materialize_table_with_swap(cursor, table_fqn: str, df: pd.DataFrame, decla
     backup_fqn = f"{schema_part}.{table_part}_backup"
 
     try:
-        # 1. Create staging table
+        # 0. Drop leftover staging/backup from prior failed runs
+        cursor.execute(drop_table_sql(staging_fqn))
+        cursor.execute(drop_table_sql(backup_fqn))
+
+        # 1. Create staging table WITHOUT primary key (avoids duplicate-key
+        #    errors during bulk COPY — the PK belongs on the final table)
         cols, keys = pg_schema_to_sql_parts({k: v for k, v in declared_schema.items()})
-        cursor.execute(create_table_sql(table_fqn=staging_fqn, cols=cols, keys=keys))
+        cursor.execute(create_table_sql(table_fqn=staging_fqn, cols=cols, keys=[]))
 
         # 2. Load data into staging
         materialize_table(cursor, staging_fqn, df, declared_schema)
@@ -421,14 +426,16 @@ def _materialize_table_with_swap(cursor, table_fqn: str, df: pd.DataFrame, decla
             )
         )
 
-        # 5. Drop backup
-        if is_object_exist(cursor, backup_fqn):
-            cursor.execute(drop_table_sql(backup_fqn))
+        # 5. Add primary key on final table (if declared)
+        if keys:
+            cursor.execute(add_primary_key_sql(table_fqn, keys))
+
+        # 6. Drop backup
+        cursor.execute(drop_table_sql(backup_fqn))
 
     except Exception:
-        # Cleanup on failure
-        if is_object_exist(cursor, staging_fqn):
-            cursor.execute(drop_table_sql(staging_fqn))
+        cursor.connection.rollback()
+        cursor.execute(drop_table_sql(staging_fqn))
         raise
 
 
