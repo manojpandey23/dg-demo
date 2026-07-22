@@ -14,18 +14,39 @@ Building data pipelines involves a lot of repetitive boilerplate: wiring up sour
 
 ## Quick start
 
+### macOS / Linux
+
 ```bash
 # Clone and install (requires Python 3.10+ and uv)
 git clone https://github.com/manojpandey23/dg-demo.git && cd dg-demo
 make dev
 ```
 
+### Windows (PowerShell)
+
+```powershell
+git clone https://github.com/manojpandey23/dg-demo.git
+cd dg-demo
+uv sync
+uv run pre-commit install
+```
+
 ### Start the infrastructure
 
 The demo stack runs Postgres, a mock REST API, and Dagster in containers.
+Requires Docker (macOS/Linux) or Docker Desktop / Podman (Windows).
+
+**macOS / Linux:**
 
 ```bash
 make demo
+```
+
+**Windows (PowerShell):**
+
+```powershell
+python manage.py reset
+docker compose up -d
 ```
 
 Once running:
@@ -40,7 +61,7 @@ Once running:
 
 ### Choose pipelines to load
 
-Use the pipeline manager to select which examples to run.
+Use the pipeline manager to select which examples to run. These commands work on all platforms:
 
 ```bash
 # See what's available
@@ -57,7 +78,7 @@ python manage.py remove all         # unload everything
 python manage.py reset              # same as remove all
 ```
 
-Or via Make:
+**macOS / Linux** — also available via Make:
 
 ```bash
 make pipeline-list
@@ -68,11 +89,19 @@ make pipeline-reset
 
 After adding or removing pipelines, reload Dagster to pick up the changes:
 
+**macOS / Linux:**
+
 ```bash
-make pipeline-reload                 # restarts the Dagster container
+make pipeline-reload
 ```
 
-When running locally with `make dagster-dev`, hot-reload is automatic — no restart needed.
+**Windows (PowerShell):**
+
+```powershell
+docker compose restart dagster-webserver
+```
+
+When running locally with `dagster dev`, hot-reload is automatic — no restart needed.
 
 Pipelines that need extra dependencies (S3, Snowflake) print setup instructions when added.
 
@@ -80,11 +109,30 @@ Pipelines that need extra dependencies (S3, Snowflake) print setup instructions 
 
 If you want to run Dagster locally instead of in Docker:
 
+**macOS / Linux:**
+
 ```bash
-make dagster-dev    # runs dagster dev -m demo.definitions
+make dagster-dev
+```
+
+**Windows (PowerShell):**
+
+```powershell
+uv run dagster dev -m demo.definitions
 ```
 
 This loads every `.macro` and `.resource` file in `demo/configs/` — whatever you added with `manage.py`. You can add or remove pipelines while the dev server is running; it detects file changes and reloads automatically.
+
+### Full reset (all platforms)
+
+To wipe everything — containers, database, loaded pipelines — and start fresh:
+
+```bash
+docker compose down -v
+python manage.py reset
+```
+
+Then run `make demo` (macOS/Linux) or `docker compose up -d` (Windows) to start clean.
 
 ---
 
@@ -807,6 +855,8 @@ tests/                      # Test suite (pytest)
 
 ## Development
 
+**macOS / Linux (Make):**
+
 ```bash
 make dev          # install deps + pre-commit hooks
 make lint         # ruff + black check
@@ -815,6 +865,20 @@ make typecheck    # mypy
 make test         # run unit tests
 make test-cov     # tests with coverage report
 make docker-build # build container image
+```
+
+**Windows (PowerShell):**
+
+```powershell
+uv sync                                                          # install deps
+uv run pre-commit install                                        # pre-commit hooks
+uv run ruff check framework/ tests/                              # lint
+uv run black --check framework/ tests/                           # format check
+uv run black framework/ tests/                                   # auto-format
+uv run mypy framework/                                           # typecheck
+uv run pytest tests/                                             # run tests
+uv run pytest tests/ --cov=framework --cov-report=term-missing   # tests + coverage
+docker build -t dagster-config-framework:latest .                # build image
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
