@@ -14,24 +14,405 @@ Building data pipelines involves a lot of repetitive boilerplate: wiring up sour
 
 ## Quick start
 
-### With Docker/Podman (recommended for first look)
-
 ```bash
+# Clone and install (requires Python 3.10+ and uv)
 git clone https://github.com/manojpandey23/dg-demo.git && cd dg-demo
-make demo
-# Open Dagster UI at http://localhost:3000
+make dev
 ```
 
-This starts a self-contained stack: PostgreSQL, a mock API, and a Dagster webserver with a sample pipeline.
+### Start the infrastructure
 
-### Local development
+The demo stack runs Postgres, a mock REST API, and Dagster in containers.
 
 ```bash
-# Requires Python 3.10+ and uv (https://docs.astral.sh/uv/)
-make dev          # install all dependencies + pre-commit hooks
-make test         # run the test suite
-make dagster-dev  # start Dagster dev server at http://localhost:3000
+make demo
 ```
+
+Once running:
+
+| Service     | URL / Address                  |
+|-------------|-------------------------------|
+| Dagster UI  | http://localhost:3000          |
+| Mock API    | http://localhost:8000          |
+| PostgreSQL  | `localhost:7432` (user: `ods`, db: `ods`, password: `demo_password`) |
+
+**Dagster starts with no pipelines loaded by default.** You choose which examples to load (or create your own).
+
+### Choose pipelines to load
+
+Use the pipeline manager to select which examples to run. The dev server hot-reloads — changes take effect immediately.
+
+```bash
+# See what's available
+python manage.py list
+
+# Load specific pipelines (by number or name)
+python manage.py add 01 02          # by number
+python manage.py add cash trades    # by partial name match
+python manage.py add all            # load everything
+
+# Remove pipelines
+python manage.py remove 01          # unload one
+python manage.py remove all         # unload everything
+python manage.py reset              # same as remove all
+```
+
+Or via Make:
+
+```bash
+make pipeline-list
+make pipeline-add P="01 02"
+make pipeline-remove P="01"
+make pipeline-reset
+```
+
+Pipelines that need extra dependencies (S3, Snowflake) print setup instructions when added.
+
+### Start Dagster (local dev, without Docker)
+
+If you want to run Dagster locally instead of in Docker:
+
+```bash
+make dagster-dev    # runs dagster dev -m demo.definitions
+```
+
+This loads every `.macro` and `.resource` file in `demo/configs/` — whatever you added with `manage.py`. You can add or remove pipelines while the dev server is running; it detects file changes and reloads automatically.
+
+---
+
+## Example pipelines
+
+Eight complete pipelines demonstrating different framework capabilities. Load any combination and run them independently.
+
+### 01 — API Ingestion (Cash Balance)
+
+```bash
+python manage.py add 01
+```
+
+**Config:** `demo/catalog/01_cash_balance.macro`
+**Flow:** `API → raw (append) → stage (full refresh)`
+**Trigger:** API polling sensor (`cash_balance_sensor`) — polls every 5 minutes
+
+The sensor polls `GET /cash_balance` on the mock API. When it returns data, it triggers `cash_balance_pipeline` — fetches the JSON, validates it, and appends rows to `demo.cash_balance_raw`, then refreshes `demo.cash_balance_stage` (full table replace). Demonstrates basic column transforms (`ref()`, `upper()`, `pd.Timestamp.utcnow()`) and validation rules.
+
+**Run it:**
+1. Open Dagster UI → **Overview → Sensors**
+2. Verify `cash_balance_sensor` is **Running** (starts automatically)
+3. Wait up to 5 minutes for the sensor to fire, or trigger immediately: **Overview → Jobs → cash_balance_pipeline → Materialize all**
+4. Check results:
+   ```sql
+   SELECT * FROM demo.cash_balance_raw LIMIT 10;
+   SELECT * FROM demo.cash_balance_stage LIMIT 10;
+   ```
+
+### 02 — Transforms and Merge (Orders)
+
+```bash
+python manage.py add 02
+```
+
+**Config:** `demo/catalog/02_orders.macro`
+**Flow:** `API → enriched orders (upsert)`
+**Trigger:** API polling sensor (`orders_sensor`) — polls every 2 minutes
+
+Fetches orders, enriches them with derived columns (computed amounts, conditional bucketing, hash keys), and upserts by `order_id`. Demonstrates the full transform DSL: `when()`, `coalesce()`, `hash_key()`, arithmetic expressions, and table-level pre/post transforms (`filter`, `dedup`, `order_by`).
+
+**Run it:**
+1. `orders_sensor` should be **Running** in the sensors panel
+2. Wait ~2 minutes or trigger manually: **Jobs → orders_pipeline → Materialize all**
+3. Query:
+   ```sql
+   SELECT * FROM demo.orders_raw LIMIT 10;
+   SELECT * FROM demo.orders_enriched LIMIT 10;
+   ```
+
+### 03 — SCD Type 2 Snapshot (Customers)
+
+```bash
+python manage.py add 03
+```
+
+**Config:** `demo/catalog/03_customers_scd2.macro`
+**Flow:** `API → raw (append) → dimension (SCD2 snapshot)`
+**Trigger:** Manual (designed for scheduled runs, but the demo runs on-demand)
+
+Fetches current customer records from `GET /customers`, appends to `demo.customers_raw`, then builds an SCD2 dimension table (`demo.customers_dim`) that tracks history. When a customer's tier or email changes, the old row is closed (`valid_to` is set) and a new row opens.
+
+**Run it:**
+1. Go to **Jobs → customers_dimension_pipeline → Materialize all**
+2. Run it once to seed the dimension
+3. Wait a moment, then run it **again** — the mock API returns slightly different data each time (random tier changes), so the second run creates SCD2 history rows
+4. Query:
+   ```sql
+   -- Current state
+   SELECT * FROM demo.customers_dim WHERE valid_to IS NULL;
+
+   -- Full history (shows closed + open rows)
+   SELECT * FROM demo.customers_dim ORDER BY customer_id, valid_from;
+   ```
+
+### 04 — CDC with Change Tracking (Trades)
+
+```bash
+python manage.py add 04
+```
+
+**Config:** `demo/catalog/04_trades_cdc.macro`
+**Flow:** `API → enriched trades (delete+insert with CDC)`
+**Trigger:** API polling sensor (`trades_sensor`) — polls every 60 seconds
+
+Polls `GET /trades` for trade executions. Each run detects row-level changes (inserts, updates, deletes) compared to the previous snapshot and writes change events to a CDC log table. Demonstrates `delete+insert` incremental strategy and complex transforms.
+
+**Run it:**
+1. Verify `trades_sensor` is **Running**
+2. Wait ~60 seconds or trigger manually: **Jobs → trades_pipeline → Materialize all**
+3. Run it twice to see change detection (the mock API randomizes trade data)
+4. Query:
+   ```sql
+   SELECT * FROM demo.trades_enriched LIMIT 10;
+
+   -- CDC change log
+   SELECT * FROM demo.trades_enriched__changes ORDER BY id DESC LIMIT 20;
+   ```
+
+### 05 — Local File Drop Ingestion
+
+```bash
+python manage.py add 05
+```
+
+**Config:** `demo/catalog/05_file_ingestion.macro`
+**Flow:** `CSV file → raw table (append)`
+**Trigger:** File drop sensor (`transactions_file_sensor`) — scans every 30 seconds
+**Watched directory:** `/data/incoming/transactions/` (container) or `$FILE_DROP_DIR` (local)
+
+The sensor watches a directory for CSV files matching `transactions_*.csv`. When a new file appears, it triggers `file_ingestion_pipeline` — reads the CSV, validates columns, and appends to `demo.transactions_raw`. Two sample files are included in `demo/sample_files/` and get picked up automatically.
+
+**Run it (Docker — files inside container):**
+
+The demo stack pre-loads two sample files. The sensor picks them up automatically. To drop a new file:
+
+```bash
+cat > /tmp/transactions_2026-07-22.csv << 'CSV'
+txn_id,account,amount,txn_date,category
+TXN-100,ACC-500,250.00,2026-07-22,salary
+TXN-101,ACC-500,42.50,2026-07-22,groceries
+CSV
+
+docker cp /tmp/transactions_2026-07-22.csv \
+  $(docker compose ps -q dagster-webserver):/data/incoming/transactions/
+```
+
+**Run it (local dev):**
+
+```bash
+export FILE_DROP_DIR="$PWD/demo/sample_files"
+make dagster-dev
+
+# Drop a new file while the dev server is running:
+cat > demo/sample_files/transactions_2026-07-22.csv << 'CSV'
+txn_id,account,amount,txn_date,category
+TXN-100,ACC-500,250.00,2026-07-22,salary
+TXN-101,ACC-500,42.50,2026-07-22,groceries
+CSV
+```
+
+Within 30 seconds, the sensor detects the new file, creates a dynamic partition, and launches a run.
+
+```sql
+SELECT source_file, COUNT(*) as rows FROM demo.transactions_raw GROUP BY source_file;
+```
+
+### 06 — Multi-Source Merge (Fan-In)
+
+```bash
+python manage.py add 06
+```
+
+**Config:** `demo/catalog/06_multi_source_merge.macro`
+**Flow:** `API + file → revenue_stage (fan-in merge)`
+**Trigger:** API polling sensor (every 3 min) + file drop sensor
+
+Two independent sources (API revenue data + file revenue data) feed into a single staging table using the OR-bridge pattern (`revenue_api | revenue_file >> revenue_stage`). Either source can trigger the merge independently.
+
+**Run it:**
+1. The API sensor fires automatically every 3 minutes
+2. To trigger the file side:
+   ```bash
+   export REVENUE_DROP_DIR="$PWD/demo/sample_revenue"
+   mkdir -p demo/sample_revenue
+
+   cat > demo/sample_revenue/revenue_2026-07-22.csv << 'CSV'
+   account_id,amount,currency,channel,revenue_date
+   FUND-A,15000.00,USD,online,2026-07-22
+   FUND-B,8500.50,EUR,retail,2026-07-22
+   CSV
+   ```
+3. Query:
+   ```sql
+   SELECT * FROM demo.revenue_stage LIMIT 20;
+   ```
+
+### 07 — Mixed Backend (Postgres + Snowflake)
+
+```bash
+python manage.py add 07
+```
+
+The manager auto-copies `snowflake.resource` and prints setup instructions.
+
+**Config:** `demo/catalog/07_mixed_backend.macro`
+**Flow:** `API → Postgres raw → Snowflake analytics`
+**Trigger:** Manual
+
+Demonstrates writing to different databases in the same pipeline: API data lands in Postgres, then transforms push to Snowflake for analytics.
+
+**Prerequisites:**
+```bash
+pip install 'dagster-config-framework[snowflake]'
+
+export SNOWFLAKE_ACCOUNT="xy12345.us-east-1"
+export SNOWFLAKE_USER="your_user"
+export SNOWFLAKE_PASSWORD="your_password"
+export SNOWFLAKE_WAREHOUSE="COMPUTE_WH"
+export SNOWFLAKE_DATABASE="ANALYTICS"
+export SNOWFLAKE_SCHEMA="PUBLIC"
+```
+
+**Run it:**
+1. Start the dev server: `make dagster-dev`
+2. Go to **Jobs → mixed_backend_pipeline → Materialize all**
+3. Query Postgres for raw data and Snowflake for the analytics table
+
+### 08 — S3 File Drop Ingestion
+
+```bash
+python manage.py add 08
+```
+
+The manager auto-copies `s3.resource` and prints setup instructions.
+
+**Config:** `demo/catalog/08_s3_file_ingestion.macro`
+**Flow:** `S3 file → raw table (append)`
+**Trigger:** S3 file sensor (`s3_transactions_sensor`) — scans every 60 seconds
+
+The sensor watches an S3 prefix (`incoming/transactions/{today()}/`) for new CSV files. When a file appears, the pipeline reads it from S3, validates columns, and appends to `demo.s3_transactions_raw`. Uses ETag-based change detection — re-uploading a file with different content triggers reprocessing.
+
+**Prerequisites:**
+
+```bash
+# AWS CLI credentials (named profile or SSO)
+aws configure --profile my-data-profile
+
+# Set environment variables
+export AWS_PROFILE="my-data-profile"
+export AWS_REGION="us-east-1"
+export S3_BUCKET="my-data-lake"
+
+# Create bucket if needed
+aws s3 mb s3://my-data-lake --profile my-data-profile
+```
+
+**Run it:**
+
+```bash
+make dagster-dev
+
+# Upload a test file to S3
+cat > /tmp/transactions_batch1.csv << 'CSV'
+txn_id,account,amount,txn_date
+TXN-S3-001,ACC-100,1500.50,2026-07-22
+TXN-S3-002,ACC-200,2300.00,2026-07-22
+CSV
+
+aws s3 cp /tmp/transactions_batch1.csv \
+  s3://my-data-lake/incoming/transactions/$(date +%Y-%m-%d)/transactions_batch1.csv \
+  --profile my-data-profile
+```
+
+Within 60 seconds, the sensor detects the new object and triggers a run. To test change detection, re-upload the file with different content — the sensor detects the ETag change and reprocesses.
+
+```sql
+SELECT * FROM demo.s3_transactions_raw ORDER BY ingested_at DESC LIMIT 20;
+```
+
+**Testing with LocalStack (no AWS account needed):**
+
+```bash
+docker run -d -p 4566:4566 localstack/localstack
+aws --endpoint-url=http://localhost:4566 s3 mb s3://my-data-lake
+aws --endpoint-url=http://localhost:4566 s3 cp /tmp/transactions_batch1.csv \
+  s3://my-data-lake/incoming/transactions/$(date +%Y-%m-%d)/transactions_batch1.csv
+
+# Set endpoint_url: http://localhost:4566 in s3.resource config
+```
+
+---
+
+## Trigger reference
+
+| Trigger Type         | Config Key             | How It Fires                        | Example |
+|----------------------|------------------------|-------------------------------------|---------|
+| API polling sensor   | `type: api_polling`    | Polls an API endpoint on interval   | 01, 02, 04, 06 |
+| File drop sensor     | `type: file_drop`      | Watches directory for new files     | 05, 06 |
+| S3 file sensor       | `type: file_drop` + `source: s3` | Watches S3 prefix for new objects | 08 |
+| Manual / job launch  | (no sensor)            | Click "Materialize all" in the UI   | 03, 07 |
+| Schedule (cron)      | `cron: "0 6 * * *"`   | Fires on a cron schedule            | (use in your own) |
+
+## Tracking strategies
+
+| Strategy   | Config                       | What It Tracks        | Best For                          |
+|------------|------------------------------|-----------------------|-----------------------------------|
+| `mtime`    | `tracking.strategy: mtime`   | File mtime + size     | Local filesystems (default, fast) |
+| `checksum` | `tracking.strategy: checksum`| MD5 content hash      | Network mounts, S3 re-uploads     |
+| Custom     | `tracking.filter_fn: fn_name`| User-defined function | Skip `.tmp` files, date filtering |
+
+---
+
+## Creating your own pipeline
+
+1. Create a `.macro` file in `demo/configs/` (or your project's config dir):
+
+   ```yaml
+   assets:
+     - name: my_asset
+       type: api
+       source:
+         resource: api_resource
+         endpoint: /my-endpoint
+       columns:
+         - name: id
+           dtype: string
+   jobs:
+     - name: my_pipeline
+       flow:
+         definition: my_asset >> my_target
+   ```
+
+2. If you need custom functions, create a Python module and register them:
+
+   ```python
+   # my_project/custom.py
+   from framework import expr_function
+
+   @expr_function
+   def my_pattern() -> str:
+       return "custom_value"
+   ```
+
+   Then in `definitions.py`:
+
+   ```python
+   loader = FrameworkLoader(
+       config_dir=Path("configs"),
+       user_modules=["my_project.custom"],
+   )
+   ```
+
+3. The dev server hot-reloads — save the file and check the UI.
+
+---
 
 ## How it works
 
@@ -296,27 +677,79 @@ file_formatters:
       lines: true
 ```
 
-## Examples
+---
 
-The [`examples/`](examples/) directory contains complete pipeline configs for common patterns:
+## Production deployment
 
-| Example | Pattern | Description |
-|---------|---------|-------------|
-| [01_api_ingestion](examples/01_api_ingestion.macro) | API -> DB | REST API polling with validation |
-| [02_file_ingestion](examples/02_file_ingestion.macro) | File -> DB | CSV file drop with file_drop sensor |
-| [03_scd2_snapshot](examples/03_scd2_snapshot.macro) | API -> raw -> SCD2 | Slowly-changing dimension tracking |
-| [04_transforms_and_validations](examples/04_transforms_and_validations.macro) | Transform DSL | Column expressions, table transforms, quality checks |
-| [05_cdc_streaming](examples/05_cdc_streaming.macro) | CDC | Change tracking with WebSocket/Kafka dispatch |
-| [06_multi_source_merge](examples/06_multi_source_merge.macro) | Fan-in merge | Multiple sources into one staging table |
-| [resources](examples/resources.resource) | Resources | Connection definitions for all resource types |
+For a full production-like stack (separate Dagster metadata Postgres, gRPC code server, webserver, daemon):
+
+### macOS / Linux (Docker or Podman)
+
+```bash
+cp deploy/.env.example deploy/.env    # edit with your settings
+
+make deploy-up                        # uses Docker by default
+make deploy-up ENGINE=podman          # use Podman instead
+
+make deploy-push                      # push pipeline config changes
+make deploy-status                    # check status
+make deploy-down                      # stop everything
+```
+
+### Windows (PowerShell + Podman)
+
+```powershell
+Copy-Item deploy\.env.example deploy\.env
+
+.\deploy\deploy.ps1 up               # start
+.\deploy\deploy.ps1 push             # push changes
+.\deploy\deploy.ps1 status           # check status
+.\deploy\deploy.ps1 down             # stop
+```
+
+### Using your own Postgres for Dagster metadata
+
+If you already have a Postgres instance for Dagster's internal storage:
+
+1. Set the connection in `deploy/.env`:
+   ```
+   DAGSTER_PG_HOST=your-postgres-host.example.com
+   DAGSTER_PG_PORT=5432
+   DAGSTER_PG_DB=dagster
+   DAGSTER_PG_USER=dagster
+   DAGSTER_PG_PASSWORD=your_secure_password
+   ```
+2. Remove the `dagster-postgres` service from `deploy/docker-compose.yml`
+3. Remove the `dagster-postgres` dependency from the `dagster-webserver` and `dagster-daemon` service definitions
+
+---
+
+## Connecting to the database
+
+All demo pipelines write to the Postgres instance at `localhost:7432`.
+
+```bash
+# psql
+psql -h localhost -p 7432 -U ods -d ods
+
+# Or any GUI tool (DBeaver, pgAdmin, DataGrip)
+# Host: localhost, Port: 7432, User: ods, Password: demo_password, DB: ods
+```
+
+List all demo tables:
+
+```sql
+SELECT table_name FROM information_schema.tables
+WHERE table_schema = 'demo' ORDER BY table_name;
+```
+
+---
 
 ## Database support
 
 The framework ships with a built-in PostgreSQL connector that handles all materialization strategies (table, incremental, snapshot), schema evolution, and CDC. PostgreSQL is the tested and recommended database for production use.
 
-The architecture separates concerns so that adding support for other databases (MySQL, Snowflake, BigQuery, DuckDB) requires implementing the materialization interface without changing the config layer or transform DSL. This is planned for future releases.
-
-Dagster itself uses its own storage database for run history, event logs, and schedules — this is separate from your pipeline's data targets.
+The architecture separates concerns so that adding support for other databases (MySQL, Snowflake, BigQuery, DuckDB) requires implementing the materialization interface without changing the config layer or transform DSL. Snowflake support is included as an optional backend (`pip install 'dagster-config-framework[snowflake]'`).
 
 ## Project structure
 
@@ -343,16 +776,25 @@ framework/                  # The framework library (this is what gets packaged)
 ├── validation/             # Data quality engine
 │   ├── engine/             # Validation runner + registry
 │   └── rules/              # Built-in validation rules
-├── postgres/               # PostgreSQL materialization
-│   ├── schema/             # DDL generation + schema evolution
-│   └── sql/                # SQL generation (CREATE, ALTER, COPY, snapshot)
+├── backends/               # Database backends
+│   ├── base.py             # DatabaseBackend ABC
+│   ├── registry.py         # Backend auto-registration
+│   ├── postgres/           # PostgreSQL: DDL, COPY, schema drift, SCD2
+│   └── snowflake.py        # Snowflake: write_pandas(), MERGE upsert
 └── cdc/                    # Change data capture
 
-examples/                   # Example pipeline configs (see table above)
-demo/                       # Self-contained demo (docker compose)
-src/test_domain/            # Development/test domain configs
+demo/                       # Self-contained demo
+├── catalog/                # All example pipeline configs (source of truth)
+├── configs/                # Active configs (symlinked by manage.py)
+├── sample_files/           # Sample CSVs for file ingestion
+├── mock_api.py             # Mock REST API for demo data
+├── definitions.py          # Dagster entry point
+└── seed.sql                # Database seed script
+
+examples/                   # Standalone example configs (same as catalog)
+manage.py                   # Pipeline manager CLI
+deploy/                     # Production deployment stack
 tests/                      # Test suite (pytest)
-docs/                       # Architecture documentation
 ```
 
 ## Development
