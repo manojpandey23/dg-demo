@@ -38,6 +38,11 @@ Thumbs.db
 htmlcov/
 coverage.xml
 
+# ── Managed pipeline configs (created by manage.py, source is demo/catalog/) ──
+demo/configs/*.macro
+demo/configs/s3.resource
+demo/configs/snowflake.resource
+
 # ── Dagster ──
 .tmp_dagster_home*/
 dagster_home/

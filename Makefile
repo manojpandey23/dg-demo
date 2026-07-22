@@ -1,4 +1,4 @@
-.PHONY: help install dev lint format typecheck test test-cov clean build dagster-dev docker-build docker-up docker-down demo deploy-build deploy-up deploy-down deploy-push deploy-status
+.PHONY: help install dev lint format typecheck test test-cov clean build dagster-dev docker-build docker-up docker-down demo deploy-build deploy-up deploy-down deploy-push deploy-status pipeline-list pipeline-add pipeline-remove pipeline-reset
 
 # ── Container engine (override with: make deploy-up ENGINE=podman) ──
 ENGINE  ?= docker
@@ -38,7 +38,7 @@ clean: ## Remove build artifacts and caches
 build: ## Build the wheel package
 	uv build
 
-dagster-dev: ## Start Dagster dev server with all demo pipelines
+dagster-dev: ## Start Dagster dev server (loads active pipelines from demo/configs/)
 	uv run dagster dev -m demo.definitions
 
 docker-build: ## Build the Docker/Podman image
@@ -50,20 +50,34 @@ docker-up: ## Start the full demo stack (Postgres + API + Dagster)
 docker-down: ## Stop the demo stack and remove volumes
 	$(COMPOSE) down -v
 
+# ============================================================
+# Pipeline management (select which examples to load)
+# ============================================================
+
+pipeline-list: ## List available pipelines and their status
+	@uv run python manage.py list
+
+pipeline-add: ## Load pipelines (e.g., make pipeline-add P="01 02")
+	@uv run python manage.py add $(P)
+
+pipeline-remove: ## Unload pipelines (e.g., make pipeline-remove P="01")
+	@uv run python manage.py remove $(P)
+
+pipeline-reset: ## Unload all pipelines
+	@uv run python manage.py reset
+
 demo: docker-up ## Run the full demo stack
 	@echo ""
-	@echo "  Demo running — all 5 pipelines loaded"
+	@echo "  Demo infrastructure running"
 	@echo ""
 	@echo "  Dagster UI   http://localhost:3000"
 	@echo "  Mock API     http://localhost:8000"
 	@echo "  PostgreSQL   localhost:7432 (user: ods, db: ods)"
 	@echo ""
-	@echo "  Pipelines:"
-	@echo "    1. Cash Balance   — API ingestion (append + full refresh)"
-	@echo "    2. Orders         — transforms, merge, derived columns"
-	@echo "    3. Customers      — SCD Type 2 dimension with history"
-	@echo "    4. Trades         — CDC with change tracking"
-	@echo "    5. File Ingestion — CSV file drop with file formatters"
+	@echo "  Load pipelines:"
+	@echo "    make pipeline-list             See available pipelines"
+	@echo "    make pipeline-add P=\"01 02\"    Load specific pipelines"
+	@echo "    make pipeline-add P=all        Load all pipelines"
 	@echo ""
 
 # ============================================================

@@ -1,0 +1,112 @@
+# ============================================================
+# Demo Pipeline 7: Mixed Backend (Postgres + Snowflake)
+#
+# Different assets in the same pipeline target different
+# database backends.
+#
+# Flow: API → Postgres (raw) → Snowflake (analytics)
+#
+# Each asset declares its backend via source.backend.
+# When omitted, defaults to "postgres".
+#
+# Prerequisites:
+#   pip install 'dagster-config-framework[snowflake]'
+#   Set SNOWFLAKE_* environment variables (see snowflake.resource)
+#
+# Requires: snowflake.resource
+#
+# Flow: API → Postgres raw → Snowflake analytics
+# ============================================================
+
+assets:
+
+  - name: revenue_mixed_api
+    type: api
+    description: "Fetch revenue from billing API"
+    group_name: mixed_backend
+    source:
+      resource: api_resource
+      endpoint: /revenue
+      method: GET
+    columns:
+      - name: account_id
+        dtype: string
+        nullable: false
+      - name: amount
+        dtype: float
+        nullable: false
+      - name: currency
+        dtype: string
+      - name: channel
+        dtype: string
+      - name: revenue_date
+        dtype: date
+
+  - name: revenue_pg_raw
+    type: database
+    description: "Land revenue in Postgres (operational store)"
+    group_name: mixed_backend
+    depends_on: [revenue_mixed_api]
+    source:
+      resource: postgres_resource
+      table: demo.revenue_pg_raw
+    model:
+      materialization: incremental
+      incremental_strategy: append
+    columns:
+      - name: account_id
+        dtype: string
+        expr: ref("account_id")
+      - name: amount
+        dtype: float
+        expr: ref("amount")
+      - name: currency
+        dtype: string
+        expr: ref("currency")
+      - name: channel
+        dtype: string
+        expr: ref("channel")
+      - name: revenue_date
+        dtype: date
+        expr: ref("revenue_date")
+      - name: ingested_at
+        dtype: datetime
+        expr: pd.Timestamp.utcnow()
+
+  - name: revenue_sf_analytics
+    type: database
+    description: "Replicate to Snowflake for analytics"
+    group_name: mixed_backend
+    depends_on: [revenue_pg_raw]
+    source:
+      resource: snowflake_resource
+      backend: snowflake
+      table: analytics.revenue_analytics
+    model:
+      materialization: table
+      on_schema_change: ignore
+    columns:
+      - name: account_id
+        dtype: string
+        expr: ref("account_id")
+      - name: amount
+        dtype: float
+        expr: ref("amount")
+      - name: currency
+        dtype: string
+        expr: ref("currency")
+      - name: channel
+        dtype: string
+        expr: ref("channel")
+      - name: revenue_date
+        dtype: date
+        expr: ref("revenue_date")
+      - name: ingested_at
+        dtype: datetime
+        expr: ref("ingested_at")
+
+jobs:
+  - name: mixed_backend_pipeline
+    description: "API → Postgres → Snowflake"
+    flow:
+      definition: revenue_mixed_api >> revenue_pg_raw >> revenue_sf_analytics

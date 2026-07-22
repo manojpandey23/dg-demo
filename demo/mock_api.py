@@ -10,6 +10,7 @@ Endpoints:
     GET /customers       — customer master data (CRM)
     GET /trades          — trade executions (capital markets)
     GET /positions       — portfolio positions (capital markets)
+    GET /revenue         — revenue records (billing)
 """
 
 import json
@@ -143,6 +144,23 @@ def gen_positions():
     return rows
 
 
+CHANNELS = ["online", "retail", "wholesale", "partner"]
+
+
+def gen_revenue(n=15):
+    today = _today()
+    return [
+        {
+            "account_id": random.choice(ACCOUNTS),
+            "amount": round(random.uniform(500, 50000), 2),
+            "currency": random.choice(CURRENCIES),
+            "channel": random.choice(CHANNELS),
+            "revenue_date": (today - timedelta(days=random.randint(0, 14))).isoformat(),
+        }
+        for _ in range(n)
+    ]
+
+
 # ── Route table ──
 
 ROUTES = {
@@ -152,6 +170,7 @@ ROUTES = {
     "/customers": gen_customers,
     "/trades": gen_trades,
     "/positions": gen_positions,
+    "/revenue": gen_revenue,
 }
 
 

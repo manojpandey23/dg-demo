@@ -1,0 +1,141 @@
+# ============================================================
+# Demo Pipeline 6: Multi-Source Merge (Fan-In)
+#
+# Two independent sources (API + file) feed into a shared
+# staging table using the OR-bridge pattern:
+#
+#   revenue_api  ──┐
+#                  ├──> revenue_stage
+#   revenue_file ──┘
+#
+# Demonstrates:
+#   - OR-bridge flow syntax (a | b >> c)
+#   - Merging API and file sources into one table
+#   - File drop sensor alongside API polling
+#   - Partition-based file processing
+#
+# To trigger:
+#   - API side fires automatically via sensor
+#   - File side: drop a CSV into the watched directory
+#
+# Flow: (API | File) → staging table
+# ============================================================
+
+file_formatters:
+  - name: csv_revenue
+    type: csv
+    config:
+      delimiter: ","
+      encoding: "utf-8"
+      null_if: ["", "NULL", "N/A"]
+
+assets:
+
+  - name: revenue_api
+    type: api
+    description: "Revenue data from the billing API"
+    group_name: multi_source
+    source:
+      resource: api_resource
+      endpoint: /revenue
+      method: GET
+    columns:
+      - name: account_id
+        dtype: string
+        nullable: false
+      - name: amount
+        dtype: float
+        nullable: false
+      - name: currency
+        dtype: string
+      - name: channel
+        dtype: string
+      - name: revenue_date
+        dtype: date
+
+  - name: revenue_file
+    type: file
+    description: "Revenue adjustments from CSV uploads"
+    group_name: multi_source
+    partition_name: revenue_files
+    file_format: csv_revenue
+    columns:
+      - name: account_id
+        dtype: string
+        nullable: false
+      - name: amount
+        dtype: float
+        nullable: false
+      - name: currency
+        dtype: string
+      - name: channel
+        dtype: string
+      - name: revenue_date
+        dtype: date
+      - name: file_name
+        dtype: string
+
+  - name: revenue_stage
+    type: database
+    description: "Merged revenue from API and file sources"
+    group_name: multi_source
+    depends_on: [revenue_api, revenue_file]
+    source:
+      resource: postgres_resource
+      table: demo.revenue_stage
+    model:
+      materialization: table
+      on_schema_change: append_new_columns
+    columns:
+      - name: account_id
+        dtype: string
+        isKey: true
+        expr: ref("account_id")
+      - name: amount
+        dtype: float
+        expr: ref("amount")
+      - name: currency
+        dtype: string
+        expr: ref("currency")
+      - name: channel
+        dtype: string
+        expr: ref("channel")
+      - name: revenue_date
+        dtype: date
+        expr: ref("revenue_date")
+      - name: ingested_at
+        dtype: datetime
+        expr: pd.Timestamp.utcnow()
+
+jobs:
+  - name: revenue_merge_pipeline
+    description: "Merge API and file revenue into staging"
+    flow:
+      definition: revenue_api | revenue_file >> revenue_stage
+
+sensors:
+  - name: revenue_api_sensor
+    type: api_polling
+    description: "Poll revenue API every 3 minutes"
+    trigger:
+      type: job
+      target: revenue_merge_pipeline
+      minimum_interval_seconds: 180
+      default_status: RUNNING
+    config:
+      resource: api_resource
+      endpoint: /revenue
+      method: GET
+
+  - name: revenue_file_sensor
+    type: file_drop
+    description: "Watch for revenue CSV uploads"
+    partition_name: revenue_files
+    trigger:
+      type: job
+      target: revenue_merge_pipeline
+      minimum_interval_seconds: 30
+      default_status: RUNNING
+    config:
+      file_path: "${REVENUE_DROP_DIR:-/data/incoming/revenue}"
+      file_pattern: "revenue_*.csv"

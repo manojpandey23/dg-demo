@@ -56,23 +56,61 @@ Once running:
 
 ---
 
-## 2. Start the Dagster dev server
+## 2. Select pipelines to load
 
-The dev server hot-reloads your pipeline definitions from `demo/configs/`.
+Dagster starts empty by default. Use the pipeline manager to choose
+which examples to load. Changes take effect immediately — the dev
+server hot-reloads.
+
+```bash
+# See what's available
+python manage.py list
+
+# Load specific pipelines (by number or name)
+python manage.py add 01 02          # by number
+python manage.py add cash trades    # by partial name match
+python manage.py add all            # load everything
+
+# Remove pipelines
+python manage.py remove 01          # unload one
+python manage.py remove all         # unload everything
+python manage.py reset              # same as remove all
+```
+
+Or via Make:
+
+```bash
+make pipeline-list
+make pipeline-add P="01 02"
+make pipeline-remove P="01"
+make pipeline-reset
+```
+
+Pipelines that need extra dependencies (S3, Snowflake) print setup
+instructions when added.
+
+
+---
+
+## 3. Start the Dagster dev server
 
 ```bash
 make dagster-dev
 ```
 
 This runs `dagster dev -m demo.definitions`, which loads every `.macro`
-and `.resource` file in `demo/configs/`.
+and `.resource` file in `demo/configs/` (i.e., whatever you added in
+step 2).
 
 Open http://localhost:3000 to see the Dagster UI.
+
+You can add or remove pipelines while the dev server is running —
+it detects file changes and reloads automatically.
 
 
 ---
 
-## 3. Choose an example to run
+## 4. Run an example pipeline
 
 Each example below explains what it does, how it triggers, and what
 you need to do to see data flow end to end.
@@ -80,7 +118,11 @@ you need to do to see data flow end to end.
 
 ### Example 1 — API Ingestion (Cash Balance)
 
-**File:** `demo/configs/01_cash_balance.macro`
+```bash
+python manage.py add 01
+```
+
+**File:** `demo/catalog/01_cash_balance.macro`
 **Trigger:** API polling sensor (`cash_balance_sensor`) — polls every 5 minutes
 **Resources:** `api_resource` (mock API), `postgres_resource`
 
@@ -104,7 +146,11 @@ refreshes `demo.cash_balance_stage` (full table replace).
 
 ### Example 2 — Transforms and Merge (Orders)
 
-**File:** `demo/configs/02_orders.macro`
+```bash
+python manage.py add 02
+```
+
+**File:** `demo/catalog/02_orders.macro`
 **Trigger:** API polling sensor (`orders_sensor`) — polls every 2 minutes
 **Resources:** `api_resource`, `postgres_resource`
 
@@ -127,7 +173,11 @@ into `demo.orders_enriched` using delete+insert on `order_id`.
 
 ### Example 3 — SCD Type 2 Snapshot (Customers)
 
-**File:** `demo/configs/03_customers_scd2.macro`
+```bash
+python manage.py add 03
+```
+
+**File:** `demo/catalog/03_customers_scd2.macro`
 **Trigger:** Manual (no sensor — designed for scheduled runs via cron, but the demo runs on-demand)
 **Resources:** `api_resource`, `postgres_resource`
 
@@ -156,7 +206,11 @@ new row opens.
 
 ### Example 4 — CDC with Change Tracking (Trades)
 
-**File:** `demo/configs/04_trades_cdc.macro`
+```bash
+python manage.py add 04
+```
+
+**File:** `demo/catalog/04_trades_cdc.macro`
 **Trigger:** API polling sensor (`trades_sensor`) — polls every 60 seconds
 **Resources:** `api_resource`, `postgres_resource`
 
@@ -182,7 +236,11 @@ and writes change events to a CDC log table. Downstream consumers
 
 ### Example 5 — Local File Drop Ingestion
 
-**File:** `demo/configs/05_file_ingestion.macro`
+```bash
+python manage.py add 05
+```
+
+**File:** `demo/catalog/05_file_ingestion.macro`
 **Trigger:** File drop sensor (`transactions_file_sensor`) — scans every 30 seconds
 **Resources:** `postgres_resource`
 **Watched directory:** `/data/incoming/transactions/` (inside the container) or
@@ -251,32 +309,51 @@ GROUP BY source_file;
 
 ### Example 6 — Multi-Source Merge (Fan-In)
 
-**File:** `examples/06_multi_source_merge.macro`
-**Trigger:** Manual
+```bash
+python manage.py add 06
+```
+
+**File:** `demo/catalog/06_multi_source_merge.macro`
+**Trigger:** API polling sensor (`revenue_api_sensor`, every 3 min) + file drop sensor (`revenue_file_sensor`)
 **Resources:** `api_resource`, `postgres_resource`
 
 **What happens:**
 Two independent sources (API revenue data + file revenue data) feed
 into a single staging table using the OR-bridge pattern
 (`revenue_api | revenue_file >> revenue_stage`). Either source
-can run independently.
+can trigger the merge independently.
 
 **Steps:**
-1. Copy the example into the demo configs:
+1. The API sensor fires automatically every 3 minutes
+2. To trigger the file side, drop a revenue CSV:
    ```bash
-   cp examples/06_multi_source_merge.macro demo/configs/
-   ```
-2. Restart the dev server (or it hot-reloads)
-3. Go to **Jobs → revenue_merge_pipeline → Materialize all**
+   # Set the revenue drop directory (local dev)
+   export REVENUE_DROP_DIR="$PWD/demo/sample_revenue"
+   mkdir -p demo/sample_revenue
 
-> **Note:** This example requires a `revenue_file` partition to exist.
-> In a real setup, a file sensor would create the partition. For the
-> demo, run the API-side assets first.
+   # Create a revenue file
+   cat > demo/sample_revenue/revenue_2026-07-22.csv << 'CSV'
+   account_id,amount,currency,channel,revenue_date
+   FUND-A,15000.00,USD,online,2026-07-22
+   FUND-B,8500.50,EUR,retail,2026-07-22
+   CSV
+   ```
+3. Both sensors trigger the same job — results merge into one table
+4. Query:
+   ```sql
+   SELECT * FROM demo.revenue_stage LIMIT 20;
+   ```
 
 
 ### Example 7 — Mixed Backend (Postgres + Snowflake)
 
-**File:** `examples/07_mixed_backend.macro`
+```bash
+python manage.py add 07
+```
+
+The manager auto-copies `snowflake.resource` and prints setup instructions.
+
+**File:** `demo/catalog/07_mixed_backend.macro`
 **Trigger:** Manual
 **Resources:** `api_resource`, `postgres_resource`, `snowflake_resource`
 
@@ -288,31 +365,30 @@ analytics.
 **Prerequisites:**
 ```bash
 pip install 'dagster-config-framework[snowflake]'
+
+export SNOWFLAKE_ACCOUNT="xy12345.us-east-1"
+export SNOWFLAKE_USER="your_user"
+export SNOWFLAKE_PASSWORD="your_password"
+export SNOWFLAKE_WAREHOUSE="COMPUTE_WH"
+export SNOWFLAKE_DATABASE="ANALYTICS"
+export SNOWFLAKE_SCHEMA="PUBLIC"
 ```
 
 **Steps:**
-1. Copy configs into demo:
-   ```bash
-   cp examples/07_mixed_backend.macro demo/configs/
-   cp examples/snowflake.resource demo/configs/
-   ```
-2. Set Snowflake credentials:
-   ```bash
-   export SNOWFLAKE_ACCOUNT="xy12345.us-east-1"
-   export SNOWFLAKE_USER="your_user"
-   export SNOWFLAKE_PASSWORD="your_password"
-   export SNOWFLAKE_WAREHOUSE="COMPUTE_WH"
-   export SNOWFLAKE_DATABASE="ANALYTICS"
-   export SNOWFLAKE_SCHEMA="PUBLIC"
-   ```
-3. Restart the dev server
-4. Go to **Jobs → mixed_backend_pipeline → Materialize all**
-5. Query Postgres for the raw data and Snowflake for the analytics table
+1. Start the dev server: `make dagster-dev`
+2. Go to **Jobs → mixed_backend_pipeline → Materialize all**
+3. Query Postgres for the raw data and Snowflake for the analytics table
 
 
 ### Example 8 — S3 File Drop Ingestion
 
-**File:** `examples/08_s3_file_ingestion.macro`
+```bash
+python manage.py add 08
+```
+
+The manager auto-copies `s3.resource` and prints setup instructions.
+
+**File:** `demo/catalog/08_s3_file_ingestion.macro`
 **Trigger:** S3 file sensor (`s3_transactions_sensor`) — scans every 60 seconds
 **Resources:** `s3_resource`, `postgres_resource`
 
@@ -356,18 +432,9 @@ different content triggers reprocessing.
 
 **Steps:**
 
-1. Copy configs into demo:
-   ```bash
-   cp examples/08_s3_file_ingestion.macro demo/configs/
-   cp examples/s3.resource demo/configs/
-   ```
+1. Start the dev server: `make dagster-dev`
 
-2. Start the dev server:
-   ```bash
-   make dagster-dev
-   ```
-
-3. Upload a file matching the expected pattern to S3:
+2. Upload a file matching the expected pattern to S3:
    ```bash
    # Create a test CSV
    cat > /tmp/transactions_batch1.csv << 'CSV'
@@ -429,7 +496,7 @@ aws --endpoint-url=http://localhost:4566 s3 cp /tmp/transactions_batch1.csv \
 
 ---
 
-## 4. Production deployment
+## 5. Production deployment
 
 For a full production-like stack (separate Dagster metadata Postgres,
 gRPC code server, webserver, daemon):
@@ -494,7 +561,7 @@ If you already have a Postgres instance for Dagster's internal storage:
 
 ---
 
-## 5. Adding your own pipeline
+## 6. Adding your own pipeline
 
 1. Create a `.macro` file in `demo/configs/` (or your project's config dir):
    ```yaml
@@ -542,10 +609,10 @@ Quick reference for how each pipeline type gets triggered.
 
 | Trigger Type         | Config Key             | How It Fires                        | Example Pipeline |
 |----------------------|------------------------|-------------------------------------|------------------|
-| API polling sensor   | `type: api_polling`    | Polls an API endpoint on interval   | 01, 02, 04       |
-| File drop sensor     | `type: file_drop`      | Watches directory for new files     | 05               |
+| API polling sensor   | `type: api_polling`    | Polls an API endpoint on interval   | 01, 02, 04, 06   |
+| File drop sensor     | `type: file_drop`      | Watches directory for new files     | 05, 06           |
 | S3 file sensor       | `type: file_drop` + `source: s3` | Watches S3 prefix for new objects | 08       |
-| Manual / job launch  | (no sensor)            | Click "Materialize all" in the UI   | 03, 06, 07       |
+| Manual / job launch  | (no sensor)            | Click "Materialize all" in the UI   | 03, 07           |
 | Schedule (cron)      | `cron: "0 6 * * *"`   | Fires on a cron schedule            | (use in your own) |
 
 ## Tracking strategies
