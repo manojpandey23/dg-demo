@@ -1,5 +1,9 @@
 .PHONY: help install dev lint format typecheck test test-cov clean build dagster-dev docker-build docker-up docker-down demo deploy-build deploy-up deploy-down deploy-push deploy-status
 
+# ── Container engine (override with: make deploy-up ENGINE=podman) ──
+ENGINE  ?= docker
+COMPOSE ?= $(ENGINE) compose
+
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
@@ -38,13 +42,13 @@ dagster-dev: ## Start Dagster dev server with all demo pipelines
 	uv run dagster dev -m demo.definitions
 
 docker-build: ## Build the Docker/Podman image
-	docker build -t dagster-config-framework:latest .
+	$(ENGINE) build -t dagster-config-framework:latest .
 
 docker-up: ## Start the full demo stack (Postgres + API + Dagster)
-	docker compose up -d
+	$(COMPOSE) up -d
 
 docker-down: ## Stop the demo stack and remove volumes
-	docker compose down -v
+	$(COMPOSE) down -v
 
 demo: docker-up ## Run the full demo stack
 	@echo ""
@@ -63,14 +67,14 @@ demo: docker-up ## Run the full demo stack
 	@echo ""
 
 # ============================================================
-# Deployment
+# Deployment (use ENGINE=podman for Podman)
 # ============================================================
 
 deploy-build: ## Build the deployment image (with dagster-postgres)
-	docker build --build-arg INSTALL_EXTRAS=deploy -t dagster-config-framework:deploy .
+	$(ENGINE) build --build-arg INSTALL_EXTRAS=deploy -t dagster-config-framework:deploy .
 
 deploy-up: deploy-build ## Start the production deployment stack
-	docker compose -f deploy/docker-compose.yml up -d
+	$(COMPOSE) -f deploy/docker-compose.yml up -d
 	@echo ""
 	@echo "  Production stack running"
 	@echo ""
@@ -83,16 +87,16 @@ deploy-up: deploy-build ## Start the production deployment stack
 	@echo ""
 
 deploy-down: ## Stop the deployment stack and remove volumes
-	docker compose -f deploy/docker-compose.yml down -v
+	$(COMPOSE) -f deploy/docker-compose.yml down -v
 
 deploy-push: ## Push pipeline changes to running instance (restarts code server)
-	docker compose -f deploy/docker-compose.yml restart code-server
+	$(COMPOSE) -f deploy/docker-compose.yml restart code-server
 	@echo ""
 	@echo "  Code server restarted — new definitions loading"
 	@echo "  Check status: make deploy-status"
 	@echo ""
 
 deploy-status: ## Show deployment stack status
-	@docker compose -f deploy/docker-compose.yml ps
+	@$(COMPOSE) -f deploy/docker-compose.yml ps
 	@echo ""
-	@docker compose -f deploy/docker-compose.yml logs code-server --tail 5 2>/dev/null || true
+	@$(COMPOSE) -f deploy/docker-compose.yml logs code-server --tail 5 2>/dev/null || true

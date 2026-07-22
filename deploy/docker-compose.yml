@@ -1,6 +1,8 @@
 # ============================================================
 # Production Deployment Stack
 #
+# Works with Docker and Podman (including Windows + Podman).
+#
 # Architecture:
 #   dagster-postgres  — Dagster metadata storage (runs, events)
 #   pipeline-postgres — Your pipeline data (assets write here)
@@ -9,18 +11,18 @@
 #   dagster-daemon    — Schedules, sensors, run queue
 #   mock-api          — Demo API (remove in production)
 #
-# Usage:
+# Docker:
 #   docker compose -f deploy/docker-compose.yml up -d
+#
+# Podman:
+#   podman compose -f deploy/docker-compose.yml up -d
+#
+# Windows (PowerShell):
+#   .\deploy\deploy.ps1 up
 #
 # To use your own Postgres for Dagster metadata:
 #   Set DAGSTER_PG_HOST, DAGSTER_PG_PORT, etc. and remove
 #   the dagster-postgres service.
-#
-# To push pipeline updates:
-#   1. Edit your .macro / .resource configs
-#   2. Run: docker compose -f deploy/docker-compose.yml
-#           restart code-server
-#   3. The webserver auto-detects the new definitions
 # ============================================================
 
 services:
@@ -41,7 +43,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
-    restart: unless-stopped
+    restart: on-failure
 
   # ── Pipeline data storage ──
   pipeline-postgres:
@@ -60,7 +62,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
-    restart: unless-stopped
+    restart: on-failure
 
   # ── Code location server (gRPC) ──
   # This is where your pipeline definitions run.
@@ -95,7 +97,7 @@ services:
         condition: service_healthy
       mock-api:
         condition: service_healthy
-    restart: unless-stopped
+    restart: on-failure
 
   # ── Dagster webserver (UI) ──
   dagster-webserver:
@@ -126,7 +128,7 @@ services:
         condition: service_healthy
       code-server:
         condition: service_started
-    restart: unless-stopped
+    restart: on-failure
 
   # ── Dagster daemon (schedules, sensors, run queue) ──
   dagster-daemon:
@@ -151,7 +153,7 @@ services:
         condition: service_healthy
       code-server:
         condition: service_started
-    restart: unless-stopped
+    restart: on-failure
 
   # ── Mock API (demo only — remove in production) ──
   mock-api:
@@ -165,7 +167,7 @@ services:
       interval: 10s
       timeout: 3s
       retries: 3
-    restart: unless-stopped
+    restart: on-failure
 
 volumes:
   dagster_pgdata:
